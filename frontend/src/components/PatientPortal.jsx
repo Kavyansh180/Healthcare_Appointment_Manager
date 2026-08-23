@@ -22,9 +22,9 @@ import {
   Building2,
   CalendarDays
 } from "lucide-react";
+import { API_URL } from "../config";
 
 export default function PatientPortal({ token, user, activeTab, setActiveTab }) {
-  const API_URL = "http://localhost:8000/api/v1";
 
   // Data states
   const [doctors, setDoctors] = useState([]);

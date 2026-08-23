@@ -18,9 +18,9 @@ import {
   Pill,
   Send
 } from "lucide-react";
+import { API_URL } from "../config";
 
 export default function DoctorPortal({ token, user, activeTab, setActiveTab }) {
-  const API_URL = "http://localhost:8000/api/v1";
 
   // Data states
   const [appointments, setAppointments] = useState([]);

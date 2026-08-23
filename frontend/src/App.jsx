@@ -4,9 +4,9 @@ import Navbar from "./components/Navbar";
 import AdminPortal from "./components/AdminPortal";
 import PatientPortal from "./components/PatientPortal";
 import DoctorPortal from "./components/DoctorPortal";
+import { API_URL } from "./config";
 
 function App() {
-  const API_URL = "http://localhost:8000/api/v1";
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
 

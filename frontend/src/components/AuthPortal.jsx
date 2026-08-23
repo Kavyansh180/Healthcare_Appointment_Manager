@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { KeyRound, Mail, User, Phone, Stethoscope, ArrowRight } from "lucide-react";
+import { API_URL } from "../config";
 
 export default function AuthPortal({ onLoginSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -12,8 +13,6 @@ export default function AuthPortal({ onLoginSuccess }) {
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleUrl, setGoogleUrl] = useState("");
-
-  const API_URL = "http://localhost:8000/api/v1";
 
   // Fetch Google OAuth URL on mount
   useEffect(() => {
