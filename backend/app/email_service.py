@@ -339,7 +339,8 @@ def send_email_smtp(recipient_email: str, title: str, body_text: str, body_html:
         
     try:
         msg = MIMEMultipart("alternative")
-        msg['From'] = settings.EMAIL_FROM or settings.EMAIL_USERNAME
+        from_display = f"Atheria Healthcare <{settings.EMAIL_USERNAME}>" if settings.EMAIL_USERNAME else settings.EMAIL_FROM
+        msg['From'] = from_display
         msg['To'] = recipient_email
         msg['Subject'] = title
         
@@ -363,7 +364,8 @@ def send_email_smtp(recipient_email: str, title: str, body_text: str, body_html:
             server.starttls()
             
         server.login(settings.EMAIL_USERNAME, settings.EMAIL_PASSWORD)
-        server.sendmail(settings.EMAIL_FROM or settings.EMAIL_USERNAME, [recipient_email], msg.as_string())
+        sender_addr = settings.EMAIL_USERNAME or settings.EMAIL_FROM
+        server.sendmail(sender_addr, [recipient_email], msg.as_string())
         server.quit()
         
         logger.info(f"Email successfully dispatched to {recipient_email} via {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
