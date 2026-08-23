@@ -4,6 +4,14 @@ Aetheria is a complete, production-grade Healthcare Appointment & Follow-up Mana
 
 ---
 
+## 🌐 Live Deployed Application
+
+- **Live Frontend (Vercel):** [https://healthcare-appointment-manager-flax.vercel.app/](https://healthcare-appointment-manager-flax.vercel.app/)
+- **Live Backend API (Render):** [https://healthcare-appointment-backend-26uu.onrender.com](https://healthcare-appointment-backend-26uu.onrender.com)
+- **Interactive Swagger API Docs:** [https://healthcare-appointment-backend-26uu.onrender.com/docs](https://healthcare-appointment-backend-26uu.onrender.com/docs)
+
+---
+
 ## ⚡ Instant Test Drive (Login as Guest)
 For quick evaluation without manual registration, we pre-seed three roles. On the login screen, click any of the **Or Test Drive (Guest Login)** buttons:
 - **Patient Dashboard**: Test slot booking, claim lock holds, and view doctor prescriptions.
@@ -270,13 +278,17 @@ Emails are not sent inline during the API request. Instead, they are written to 
 
 ## Deployment Configuration
 
-The application is fully prepared for deployment on **Render** (for the FastAPI backend + MySQL) and **Vercel** (for the React Vite frontend):
+The application is deployed live and configured as follows:
 
-1. **Backend (Render):**
-   - Environment: Python
-   - Build Command: `pip install -r requirements.txt && alembic upgrade head`
-   - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-2. **Frontend (Vercel):**
+1. **Frontend (Vercel):**
+   - **Live URL:** [https://healthcare-appointment-manager-flax.vercel.app/](https://healthcare-appointment-manager-flax.vercel.app/)
    - Framework Preset: Vite
    - Build Command: `npm run build`
    - Output Directory: `dist`
+
+2. **Backend (Render):**
+   - **Live API URL:** [https://healthcare-appointment-backend-26uu.onrender.com](https://healthcare-appointment-backend-26uu.onrender.com)
+   - **Swagger Docs:** [https://healthcare-appointment-backend-26uu.onrender.com/docs](https://healthcare-appointment-backend-26uu.onrender.com/docs)
+   - Environment: Python
+   - Build Command: `pip install -r requirements.txt && alembic upgrade head`
+   - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
