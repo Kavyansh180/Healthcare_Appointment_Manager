@@ -324,52 +324,77 @@ def get_test_email_html(recipient_email: str, server_info: str) -> str:
 
 
 def send_email_smtp(recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> bool:
+    success, _ = send_email_with_error(recipient_email, title, body_text, body_html)
+    return success
+
+def send_email_with_error(recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
     """
     Dispatches an email via configured SMTP (Gmail, SendGrid SMTP, Mailgun, custom).
-    If credentials are not configured, logs the email for audit and returns True.
+    Sanitizes credentials, handles multi-port fallbacks (587 STARTTLS & 465 SSL),
+    and returns (success, error_message).
     """
+    username = (settings.EMAIL_USERNAME or "").strip()
+    password = (settings.EMAIL_PASSWORD or "").replace(" ", "").replace('"', '').replace("'", "").strip()
+    host = (settings.EMAIL_HOST or "smtp.gmail.com").strip()
+    primary_port = int(settings.EMAIL_PORT or 587)
+    
     # Graceful mock handling when credentials are empty
-    if not settings.EMAIL_USERNAME or not settings.EMAIL_PASSWORD:
+    if not username or not password:
         logger.info("\n=======================================================")
         logger.info(f"[EMAIL MOCK OUTBOX] Sending to: {recipient_email}")
         logger.info(f"Subject: {title}")
         logger.info(f"Text Payload:\n{body_text}")
         logger.info("=======================================================\n")
-        return True
+        return True, None
         
-    try:
-        msg = MIMEMultipart("alternative")
-        from_display = f"Atheria Healthcare <{settings.EMAIL_USERNAME}>" if settings.EMAIL_USERNAME else settings.EMAIL_FROM
-        msg['From'] = from_display
-        msg['To'] = recipient_email
-        msg['Subject'] = title
+    msg = MIMEMultipart("alternative")
+    from_display = f"Atheria Healthcare <{username}>" if username else (settings.EMAIL_FROM or "no-reply@atheria-health.com")
+    msg['From'] = from_display
+    msg['To'] = recipient_email
+    msg['Subject'] = title
+    
+    # Attach plain text
+    part1 = MIMEText(body_text, 'plain', 'utf-8')
+    msg.attach(part1)
+    
+    # Attach rich HTML if provided
+    if body_html:
+        part2 = MIMEText(body_html, 'html', 'utf-8')
+        msg.attach(part2)
+    else:
+        part2 = MIMEText(get_email_base_wrapper(title, f"<p>{body_text.replace(chr(10), '<br/>')}</p>"), 'html', 'utf-8')
+        msg.attach(part2)
         
-        # Attach plain text
-        part1 = MIMEText(body_text, 'plain', 'utf-8')
-        msg.attach(part1)
+    sender_addr = username or settings.EMAIL_FROM
+    errors = []
+    
+    # Define ports to try (Primary configured port first, then automatic fallback port)
+    ports_to_try = [primary_port]
+    if primary_port == 587 and 465 not in ports_to_try:
+        ports_to_try.append(465)
+    elif primary_port == 465 and 587 not in ports_to_try:
+        ports_to_try.append(587)
         
-        # Attach rich HTML if provided
-        if body_html:
-            part2 = MIMEText(body_html, 'html', 'utf-8')
-            msg.attach(part2)
-        else:
-            part2 = MIMEText(get_email_base_wrapper(title, f"<p>{body_text.replace(chr(10), '<br/>')}</p>"), 'html', 'utf-8')
-            msg.attach(part2)
-        
-        # Connect to SMTP server
-        if settings.EMAIL_PORT == 465:
-            server = smtplib.SMTP_SSL(settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=10)
-        else:
-            server = smtplib.SMTP(settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=10)
-            server.starttls()
+    for port in ports_to_try:
+        try:
+            logger.info(f"Attempting SMTP dispatch to {recipient_email} via {host}:{port}...")
+            if port == 465:
+                server = smtplib.SMTP_SSL(host, port, timeout=12)
+            else:
+                server = smtplib.SMTP(host, port, timeout=12)
+                server.starttls()
+                
+            server.login(username, password)
+            server.sendmail(sender_addr, [recipient_email], msg.as_string())
+            server.quit()
             
-        server.login(settings.EMAIL_USERNAME, settings.EMAIL_PASSWORD)
-        sender_addr = settings.EMAIL_USERNAME or settings.EMAIL_FROM
-        server.sendmail(sender_addr, [recipient_email], msg.as_string())
-        server.quit()
-        
-        logger.info(f"Email successfully dispatched to {recipient_email} via {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to send email to {recipient_email}: {e}")
-        return False
+            logger.info(f"Email successfully dispatched to {recipient_email} via {host}:{port}")
+            return True, None
+        except Exception as e:
+            err_str = f"Port {port} error: {str(e)}"
+            logger.warning(f"SMTP dispatch attempt failed ({err_str}).")
+            errors.append(err_str)
+            
+    final_error = " | ".join(errors)
+    logger.error(f"Failed all SMTP dispatch attempts to {recipient_email}: {final_error}")
+    return False, final_error

@@ -290,6 +290,12 @@ export default function NotificationCenterModal({ isOpen, onClose, token, user }
                             <span className="text-rose-400/80">({noti.retry_count} retries)</span>
                           )}
                         </div>
+                        {noti.status === "failed" && noti.error_message && (
+                          <div className="text-[11px] text-rose-300 mt-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/25 flex items-start gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0 mt-0.5" />
+                            <span><strong>Error details:</strong> {noti.error_message}</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2 self-end md:self-auto">
