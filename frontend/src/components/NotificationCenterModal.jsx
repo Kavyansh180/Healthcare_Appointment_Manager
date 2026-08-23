@@ -115,6 +115,8 @@ export default function NotificationCenterModal({ isOpen, onClose, token, user }
     }
   };
 
+  const [flushing, setFlushing] = useState(false);
+
   const handleRetryNotification = async (notiId) => {
     setRetryingId(notiId);
     try {
@@ -133,7 +135,26 @@ export default function NotificationCenterModal({ isOpen, onClose, token, user }
     }
   };
 
+  const handleFlushQueue = async () => {
+    setFlushing(true);
+    try {
+      const res = await fetch(`${API_URL}/notifications/flush-queue`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        await fetchNotifications();
+        await fetchStats();
+      }
+    } catch (err) {
+      console.error("Error flushing queue:", err);
+    } finally {
+      setFlushing(false);
+    }
+  };
+
   if (!isOpen) return null;
+
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
@@ -217,7 +238,17 @@ export default function NotificationCenterModal({ isOpen, onClose, token, user }
           </div>
 
           {activeTab === "outbox" && (
-            <div className="flex items-center gap-2 pb-2">
+            <div className="flex items-center gap-2 pb-2 flex-wrap">
+              {stats.pending_count > 0 && (
+                <button
+                  onClick={handleFlushQueue}
+                  disabled={flushing}
+                  className="px-2.5 py-1 rounded-lg bg-divine-gold/20 border border-divine-gold/40 text-divine-gold text-xs font-semibold hover:bg-divine-gold/30 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Send className={`w-3 h-3 ${flushing ? "animate-spin" : ""}`} />
+                  <span>{flushing ? "Dispatching..." : `Dispatch Queue (${stats.pending_count})`}</span>
+                </button>
+              )}
               <div className="flex items-center gap-1 bg-deep-black/60 p-1 rounded-lg border border-divine-gold/15 text-[11px]">
                 {["all", "sent", "pending", "failed"].map((f) => (
                   <button
@@ -307,14 +338,18 @@ export default function NotificationCenterModal({ isOpen, onClose, token, user }
                           View Template
                         </button>
 
-                        {noti.status === "failed" && (
+                        {(noti.status === "failed" || noti.status === "pending") && (
                           <button
                             onClick={() => handleRetryNotification(noti.id)}
                             disabled={retryingId === noti.id}
-                            className="px-3 py-1.5 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs font-semibold hover:bg-rose-500/30 transition-all cursor-pointer flex items-center gap-1.5"
+                            className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                              noti.status === "pending"
+                                ? "bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30"
+                                : "bg-rose-500/20 border-rose-500/40 text-rose-300 hover:bg-rose-500/30"
+                            }`}
                           >
                             <RotateCcw className={`w-3.5 h-3.5 ${retryingId === noti.id ? "animate-spin" : ""}`} />
-                            Retry
+                            {noti.status === "pending" ? "Dispatch Now" : "Retry"}
                           </button>
                         )}
                       </div>
@@ -324,6 +359,7 @@ export default function NotificationCenterModal({ isOpen, onClose, token, user }
               )}
             </div>
           )}
+
 
           {/* TAB 2: SEND LIVE TEST EMAIL */}
           {activeTab === "test" && (

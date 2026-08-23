@@ -127,3 +127,36 @@ def retry_notification(
     db.commit()
     db.refresh(noti)
     return noti
+
+@router.post("/flush-queue", response_model=List[NotificationResponse])
+def flush_queue(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Manually triggers immediate dispatch of all pending or failed notifications in the outbox.
+    """
+    query = db.query(Notification).filter(Notification.status.in_(["pending", "failed"]))
+    if current_user.role != "admin":
+        query = query.filter(Notification.user_id == current_user.id)
+    pending_list = query.all()
+    
+    for noti in pending_list:
+        noti.last_attempt = datetime.utcnow()
+        success, err_msg = send_email_with_error(
+            recipient_email=noti.recipient_email,
+            title=noti.title,
+            body_text=noti.message,
+            body_html=noti.html_content
+        )
+        if success:
+            noti.status = "sent"
+            noti.error_message = None
+        else:
+            noti.status = "failed"
+            noti.retry_count += 1
+            noti.error_message = err_msg or "Dispatch attempt failed"
+            
+    db.commit()
+    return pending_list
+
