@@ -363,11 +363,16 @@ def send_via_sendgrid_api(api_key: str, recipient_email: str, title: str, body_t
     """Dispatches email via SendGrid Web API v3 (HTTPS Port 443)."""
     import requests
     try:
-        sender_email = settings.EMAIL_FROM or "no-reply@atheria-health.com"
+        raw_sender = (settings.EMAIL_FROM or settings.EMAIL_USERNAME or "kavyansh1509@gmail.com").strip()
+        import re
+        m = re.search(r'<([^>]+)>', raw_sender)
+        sender_email = m.group(1).strip() if m else raw_sender
+        
         payload = {
             "personalizations": [{"to": [{"email": recipient_email}]}],
             "from": {"email": sender_email, "name": "Atheria Healthcare"},
             "subject": title,
+
             "content": [
                 {"type": "text/plain", "value": body_text},
                 {"type": "text/html", "value": body_html or f"<p>{body_text.replace(chr(10), '<br/>')}</p>"}
