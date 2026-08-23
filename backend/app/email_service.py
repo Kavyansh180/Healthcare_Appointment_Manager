@@ -427,33 +427,13 @@ def send_via_brevo_api(api_key: str, recipient_email: str, title: str, body_text
 def send_email_with_error(recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
     """
     Universal multi-tier email dispatcher.
-    Attempts cloud APIs (Resend, SendGrid, Brevo) if keys are provided.
-    If Resend fails (e.g., 403 sandbox restriction allowing only verified account owners),
-    it automatically falls through to standard Gmail SMTP (Port 587/465 TLS/SSL)
-    guaranteeing that ANY patient or doctor mailbox receives emails.
+    Attempts cloud APIs (Brevo, Resend, SendGrid) over HTTPS (Port 443) to guarantee 
+    delivery on cloud platforms like Render where raw SMTP sockets are firewall-blocked.
     """
     attempted_providers = []
     errors = []
 
-    # 1. Try Resend HTTPS REST API (if key provided)
-    if settings.RESEND_API_KEY and settings.RESEND_API_KEY.strip():
-        attempted_providers.append("Resend")
-        res_ok, res_err = send_via_resend_api(settings.RESEND_API_KEY, recipient_email, title, body_text, body_html)
-        if res_ok:
-            return True, None
-        logger.warning(f"[EMAIL FALLBACK] Resend dispatch to {recipient_email} failed ({res_err}). Falling back to next available provider...")
-        errors.append(f"Resend: {res_err}")
-
-    # 2. Try SendGrid HTTPS REST API (if key provided)
-    if settings.SENDGRID_API_KEY and settings.SENDGRID_API_KEY.strip():
-        attempted_providers.append("SendGrid")
-        sg_ok, sg_err = send_via_sendgrid_api(settings.SENDGRID_API_KEY, recipient_email, title, body_text, body_html)
-        if sg_ok:
-            return True, None
-        logger.warning(f"[EMAIL FALLBACK] SendGrid dispatch to {recipient_email} failed ({sg_err}). Falling back...")
-        errors.append(f"SendGrid: {sg_err}")
-
-    # 3. Try Brevo HTTPS REST API (if key provided)
+    # 1. Try Brevo HTTPS REST API (Port 443) - Recommended for Render (No domain verification needed, delivers to ANY inbox)
     if settings.BREVO_API_KEY and settings.BREVO_API_KEY.strip():
         attempted_providers.append("Brevo")
         br_ok, br_err = send_via_brevo_api(settings.BREVO_API_KEY, recipient_email, title, body_text, body_html)
@@ -462,11 +442,30 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
         logger.warning(f"[EMAIL FALLBACK] Brevo dispatch to {recipient_email} failed ({br_err}). Falling back...")
         errors.append(f"Brevo: {br_err}")
 
-    # 4. Standard SMTP Dispatch (Gmail / TLS / SSL) - No domain restrictions!
+    # 2. Try Resend HTTPS REST API (if key provided)
+    if settings.RESEND_API_KEY and settings.RESEND_API_KEY.strip():
+        attempted_providers.append("Resend")
+        res_ok, res_err = send_via_resend_api(settings.RESEND_API_KEY, recipient_email, title, body_text, body_html)
+        if res_ok:
+            return True, None
+        logger.warning(f"[EMAIL FALLBACK] Resend dispatch to {recipient_email} failed ({res_err}). Falling back...")
+        errors.append(f"Resend: {res_err}")
+
+    # 3. Try SendGrid HTTPS REST API (if key provided)
+    if settings.SENDGRID_API_KEY and settings.SENDGRID_API_KEY.strip():
+        attempted_providers.append("SendGrid")
+        sg_ok, sg_err = send_via_sendgrid_api(settings.SENDGRID_API_KEY, recipient_email, title, body_text, body_html)
+        if sg_ok:
+            return True, None
+        logger.warning(f"[EMAIL FALLBACK] SendGrid dispatch to {recipient_email} failed ({sg_err}). Falling back...")
+        errors.append(f"SendGrid: {sg_err}")
+
+    # 4. Standard SMTP Dispatch (Gmail / TLS / SSL)
     username = (settings.EMAIL_USERNAME or "").strip()
     password = (settings.EMAIL_PASSWORD or "").replace(" ", "").replace('"', '').replace("'", "").strip()
     host = (settings.EMAIL_HOST or "smtp.gmail.com").strip()
     primary_port = int(settings.EMAIL_PORT or 587)
+
     
     # Graceful mock handling when credentials are empty and no cloud API was configured
     if not username or not password:

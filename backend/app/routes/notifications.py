@@ -58,7 +58,14 @@ def send_test_email(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    server_info = f"{settings.EMAIL_HOST}:{settings.EMAIL_PORT} (User: {settings.EMAIL_USERNAME or 'Local Mock Mode'})"
+    active_mode = "Brevo HTTPS API (Port 443)" if settings.BREVO_API_KEY else (
+        "Resend HTTPS API" if settings.RESEND_API_KEY else (
+            "SendGrid HTTPS API" if settings.SENDGRID_API_KEY else (
+                f"SMTP {settings.EMAIL_HOST}:{settings.EMAIL_PORT}" if settings.EMAIL_USERNAME else "Local Mock Mode"
+            )
+        )
+    )
+    server_info = f"{active_mode} • Sender: {settings.EMAIL_FROM or settings.EMAIL_USERNAME or 'kavyansh1509@gmail.com'}"
     subject = request_in.subject or "Atheria Live Email Dispatch Test"
     text_body = (
         f"Atheria Healthcare Email Delivery Verification\n\n"
@@ -67,6 +74,7 @@ def send_test_email(
         f"Your notification subsystem is active and operating normally."
     )
     html_body = get_test_email_html(request_in.recipient_email, server_info)
+
     
     # Attempt immediate dispatch
     success, err_msg = send_email_with_error(
