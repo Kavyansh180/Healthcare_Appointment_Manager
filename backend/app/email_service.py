@@ -327,12 +327,116 @@ def send_email_smtp(recipient_email: str, title: str, body_text: str, body_html:
     success, _ = send_email_with_error(recipient_email, title, body_text, body_html)
     return success
 
+def send_via_resend_api(api_key: str, recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
+    """Dispatches email via Resend HTTPS REST API (Port 443 - Never blocked on Render/AWS/Vercel)."""
+    import requests
+    try:
+        sender_from = settings.EMAIL_FROM or "Atheria Healthcare <onboarding@resend.dev>"
+        if "<" not in sender_from:
+            sender_from = f"Atheria Healthcare <{sender_from}>"
+            
+        payload = {
+            "from": sender_from,
+            "to": [recipient_email],
+            "subject": title,
+            "html": body_html or f"<p>{body_text.replace(chr(10), '<br/>')}</p>",
+            "text": body_text
+        }
+        res = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key.strip()}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=10
+        )
+        if res.status_code in [200, 201]:
+            logger.info(f"[RESEND API] Email successfully sent to {recipient_email}")
+            return True, None
+        else:
+            err_msg = f"Resend API error ({res.status_code}): {res.text}"
+            logger.error(err_msg)
+            return False, err_msg
+    except Exception as e:
+        logger.error(f"[RESEND API Exception] {e}")
+        return False, str(e)
+
+def send_via_sendgrid_api(api_key: str, recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
+    """Dispatches email via SendGrid Web API v3 (HTTPS Port 443)."""
+    import requests
+    try:
+        sender_email = settings.EMAIL_FROM or "no-reply@atheria-health.com"
+        payload = {
+            "personalizations": [{"to": [{"email": recipient_email}]}],
+            "from": {"email": sender_email, "name": "Atheria Healthcare"},
+            "subject": title,
+            "content": [
+                {"type": "text/plain", "value": body_text},
+                {"type": "text/html", "value": body_html or f"<p>{body_text.replace(chr(10), '<br/>')}</p>"}
+            ]
+        }
+        res = requests.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            headers={"Authorization": f"Bearer {api_key.strip()}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=10
+        )
+        if res.status_code in [200, 202]:
+            logger.info(f"[SENDGRID API] Email successfully sent to {recipient_email}")
+            return True, None
+        else:
+            err_msg = f"SendGrid API error ({res.status_code}): {res.text}"
+            logger.error(err_msg)
+            return False, err_msg
+    except Exception as e:
+        logger.error(f"[SENDGRID API Exception] {e}")
+        return False, str(e)
+
+def send_via_brevo_api(api_key: str, recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
+    """Dispatches email via Brevo REST API (HTTPS Port 443)."""
+    import requests
+    try:
+        sender_email = settings.EMAIL_FROM or "no-reply@atheria-health.com"
+        payload = {
+            "sender": {"name": "Atheria Healthcare", "email": sender_email},
+            "to": [{"email": recipient_email}],
+            "subject": title,
+            "htmlContent": body_html or f"<p>{body_text.replace(chr(10), '<br/>')}</p>",
+            "textContent": body_text
+        }
+        res = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": api_key.strip(), "Content-Type": "application/json"},
+            json=payload,
+            timeout=10
+        )
+        if res.status_code in [200, 201, 202]:
+            logger.info(f"[BREVO API] Email successfully sent to {recipient_email}")
+            return True, None
+        else:
+            err_msg = f"Brevo API error ({res.status_code}): {res.text}"
+            logger.error(err_msg)
+            return False, err_msg
+    except Exception as e:
+        logger.error(f"[BREVO API Exception] {e}")
+        return False, str(e)
+
 def send_email_with_error(recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
     """
-    Dispatches an email via configured SMTP (Gmail, SendGrid SMTP, Mailgun, custom).
-    Sanitizes credentials, handles multi-port fallbacks (587 STARTTLS & 465 SSL),
-    and returns (success, error_message).
+    Dispatches email via HTTPS REST APIs (Resend, SendGrid, Brevo) or SMTP (Gmail/TLS).
+    If on Render Free Tier where SMTP sockets are blocked (Errno 101), provides clear guidance.
     """
+    # 1. Try Resend HTTPS REST API if key provided (Recommended for Render/Vercel)
+    if settings.RESEND_API_KEY and settings.RESEND_API_KEY.strip():
+        return send_via_resend_api(settings.RESEND_API_KEY, recipient_email, title, body_text, body_html)
+        
+    # 2. Try SendGrid HTTPS REST API if key provided
+    if settings.SENDGRID_API_KEY and settings.SENDGRID_API_KEY.strip():
+        return send_via_sendgrid_api(settings.SENDGRID_API_KEY, recipient_email, title, body_text, body_html)
+
+    # 3. Try Brevo HTTPS REST API if key provided
+    if settings.BREVO_API_KEY and settings.BREVO_API_KEY.strip():
+        return send_via_brevo_api(settings.BREVO_API_KEY, recipient_email, title, body_text, body_html)
+
+    # 4. Standard SMTP Dispatch (Gmail / TLS)
     username = (settings.EMAIL_USERNAME or "").strip()
     password = (settings.EMAIL_PASSWORD or "").replace(" ", "").replace('"', '').replace("'", "").strip()
     host = (settings.EMAIL_HOST or "smtp.gmail.com").strip()
@@ -368,7 +472,6 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
     sender_addr = username or settings.EMAIL_FROM
     errors = []
     
-    # Define ports to try (Primary configured port first, then automatic fallback port)
     ports_to_try = [primary_port]
     if primary_port == 587 and 465 not in ports_to_try:
         ports_to_try.append(465)
@@ -379,9 +482,9 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
         try:
             logger.info(f"Attempting SMTP dispatch to {recipient_email} via {host}:{port}...")
             if port == 465:
-                server = smtplib.SMTP_SSL(host, port, timeout=12)
+                server = smtplib.SMTP_SSL(host, port, timeout=10)
             else:
-                server = smtplib.SMTP(host, port, timeout=12)
+                server = smtplib.SMTP(host, port, timeout=10)
                 server.starttls()
                 
             server.login(username, password)
@@ -391,7 +494,11 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
             logger.info(f"Email successfully dispatched to {recipient_email} via {host}:{port}")
             return True, None
         except Exception as e:
-            err_str = f"Port {port} error: {str(e)}"
+            err_str = str(e)
+            if "101" in err_str or "unreachable" in err_str.lower():
+                err_str = f"Port {port} blocked by cloud host firewall (Render Free Tier disables outbound SMTP sockets). Use RESEND_API_KEY over HTTPS (port 443)."
+            else:
+                err_str = f"Port {port} error: {err_str}"
             logger.warning(f"SMTP dispatch attempt failed ({err_str}).")
             errors.append(err_str)
             
