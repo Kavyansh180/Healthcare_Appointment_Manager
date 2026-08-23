@@ -55,10 +55,7 @@ For quick evaluation without manual registration, we pre-seed three roles. On th
    ```bash
    pip install -r requirements.txt
    ```
-4. Configure environment variables. Copy `.env.example` to `.env` and fill in your credentials:
-   ```bash
-   cp .env.example .env
-   ```
+4. (Optional) Configure environment variables in a `.env` file if connecting to an external MySQL, Groq, or SMTP server (the application runs out-of-the-box with SQLite fallback and guest accounts with zero extra setup).
 5. Apply database migrations:
    ```bash
    alembic upgrade head
