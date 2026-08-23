@@ -242,8 +242,20 @@ export default function Navbar({
                 <Database className="w-3.5 h-3.5" />
                 SQL & DB
               </button>
+              <button
+                onClick={() => setActiveTab("email-settings")}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+                  activeTab === "email-settings"
+                    ? "bg-divine-gold/20 text-divine-gold border border-divine-gold/30 shadow-sm"
+                    : "text-warm-white/70 hover:text-cream hover:bg-white/5"
+                }`}
+              >
+                <Mail className="w-3.5 h-3.5" />
+                Resend Email API
+              </button>
             </>
           )}
+
         </nav>
 
         {/* Live Email Center & User Pill & Logout */}

@@ -1,18 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import date
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel
 
 from ..database import get_db
-from ..models import User, Doctor, DoctorAvailability, DoctorLeave, Appointment, Notification
+from ..models import User, Doctor, DoctorAvailability, DoctorLeave, Appointment, Notification, SystemSetting
 from ..schemas import DoctorCreate, DoctorProfileResponse, DoctorAvailabilityCreate, DoctorAvailabilityResponse, DoctorLeaveCreate, DoctorLeaveResponse, UserCreate
 from ..auth import RoleChecker, get_password_hash
 from ..calendar_service import delete_appointment_calendar_event
 from ..email_service import (
     get_leave_cancellation_patient_html, 
     get_leave_cancellation_doctor_html,
-    dispatch_notification_immediately
+    dispatch_notification_immediately,
+    send_via_resend_api,
+    get_test_email_html,
+    get_effective_email_config,
+    settings
 )
+
 
 router = APIRouter(prefix="/admin", tags=["Admin Portal"])
 admin_required = Depends(RoleChecker(["admin"]))
@@ -294,3 +300,78 @@ def add_doctor_leave(
 
     db.refresh(leave)
     return leave
+
+
+class EmailSettingsUpdate(BaseModel):
+    resend_api_key: str
+    email_from: Optional[str] = None
+
+class EmailSettingsTest(BaseModel):
+    test_email: str
+    resend_api_key: Optional[str] = None
+    email_from: Optional[str] = None
+
+@router.get("/email-settings")
+def get_email_settings(db: Session = Depends(get_db), _ = admin_required):
+    cfg = get_effective_email_config()
+    rk = cfg.get("resend_api_key", "")
+    masked = f"{rk[:6]}...{rk[-4:]}" if len(rk) > 10 else ("Configured" if rk else "")
+    return {
+        "has_resend": bool(rk),
+        "resend_api_key_masked": masked,
+        "email_from": cfg.get("email_from", "Atheria Healthcare <onboarding@resend.dev>"),
+        "active_provider": "Resend HTTPS API" if rk else "Local Mock / None"
+    }
+
+@router.post("/email-settings")
+def save_email_settings(data: EmailSettingsUpdate, db: Session = Depends(get_db), _ = admin_required):
+    key_val = data.resend_api_key.strip()
+    from_val = (data.email_from or "").strip() or "Atheria Healthcare <onboarding@resend.dev>"
+    
+    # Upsert resend_api_key
+    rk_row = db.query(SystemSetting).filter(SystemSetting.key == "resend_api_key").first()
+    if not rk_row:
+        rk_row = SystemSetting(key="resend_api_key", value=key_val)
+        db.add(rk_row)
+    else:
+        rk_row.value = key_val
+
+    # Upsert email_from
+    ef_row = db.query(SystemSetting).filter(SystemSetting.key == "email_from").first()
+    if not ef_row:
+        ef_row = SystemSetting(key="email_from", value=from_val)
+        db.add(ef_row)
+    else:
+        ef_row.value = from_val
+
+    db.commit()
+    
+    # Update runtime settings
+    settings.RESEND_API_KEY = key_val
+    settings.EMAIL_FROM = from_val
+    
+    return {
+        "success": True,
+        "message": "Resend API settings saved successfully! All transactional emails will now be dispatched using this key.",
+        "email_from": from_val
+    }
+
+@router.post("/email-settings/test")
+def test_resend_email_settings(data: EmailSettingsTest, db: Session = Depends(get_db), _ = admin_required):
+    cfg = get_effective_email_config()
+    api_key = data.resend_api_key or cfg.get("resend_api_key")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No Resend API Key provided or configured.")
+        
+    sender = data.email_from or cfg.get("email_from") or "Atheria Healthcare <onboarding@resend.dev>"
+    
+    subject = "Atheria Resend API Live Verification"
+    text_body = f"Hello! This is a test email sent from Atheria Healthcare Admin Portal verifying that your Resend API Key is connected and operating normally."
+    html_body = get_test_email_html(data.test_email, f"Resend HTTPS API (From: {sender})")
+    
+    success, err_msg = send_via_resend_api(api_key, data.test_email, subject, text_body, html_body)
+    if success:
+        return {"success": True, "message": f"Verification email sent successfully to {data.test_email}!"}
+    else:
+        raise HTTPException(status_code=400, detail=f"Resend API Error: {err_msg}")
+

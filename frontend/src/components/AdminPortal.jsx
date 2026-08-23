@@ -20,8 +20,13 @@ import {
   Layers,
   Terminal,
   Copy,
-  Check
+  Check,
+  Mail,
+  Send,
+  Key,
+  RefreshCw
 } from "lucide-react";
+
 import { API_URL } from "../config";
 
 export default function AdminPortal({ token, user, activeTab, setActiveTab }) {
@@ -54,11 +59,104 @@ export default function AdminPortal({ token, user, activeTab, setActiveTab }) {
   const [leaveDate, setLeaveDate] = useState("");
   const [leaveReason, setLeaveReason] = useState("");
 
+  // Email & Resend Settings state
+  const [emailConfig, setEmailConfig] = useState({
+    has_resend: false,
+    resend_api_key_masked: "",
+    email_from: "Atheria Healthcare <onboarding@resend.dev>",
+    active_provider: "Resend HTTPS API"
+  });
+  const [resendApiKey, setResendApiKey] = useState("");
+  const [resendEmailFrom, setResendEmailFrom] = useState("Atheria Healthcare <onboarding@resend.dev>");
+  const [savingEmailConfig, setSavingEmailConfig] = useState(false);
+  const [testRecipient, setTestRecipient] = useState(user?.email || "kavyansh1509@gmail.com");
+  const [testingResend, setTestingResend] = useState(false);
+  const [testResendSuccess, setTestResendSuccess] = useState("");
+  const [testResendError, setTestResendError] = useState("");
+
   useEffect(() => {
     fetchDoctors();
     fetchLeaves();
     fetchAnalytics();
+    fetchEmailConfig();
   }, [token]);
+
+  const fetchEmailConfig = async () => {
+    try {
+      const res = await fetch(`${API_URL}/admin/email-settings`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEmailConfig(data);
+        if (data.email_from) setResendEmailFrom(data.email_from);
+      }
+    } catch (err) {
+      console.error("Fetch email config error:", err);
+    }
+  };
+
+  const handleSaveEmailConfig = async (e) => {
+    e.preventDefault();
+    if (!resendApiKey.trim()) {
+      setError("Please enter a valid Resend API Key.");
+      return;
+    }
+    setSavingEmailConfig(true);
+    setError("");
+    setSuccess("");
+    try {
+      const res = await fetch(`${API_URL}/admin/email-settings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          resend_api_key: resendApiKey.trim(),
+          email_from: resendEmailFrom.trim()
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to save email settings.");
+      setSuccess("Resend API Key successfully connected & saved! All transactional emails will now dispatch via this key.");
+      setResendApiKey("");
+      fetchEmailConfig();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingEmailConfig(false);
+    }
+  };
+
+  const handleTestResendEmail = async (e) => {
+    e.preventDefault();
+    if (!testRecipient.trim()) return;
+    setTestingResend(true);
+    setTestResendSuccess("");
+    setTestResendError("");
+    try {
+      const res = await fetch(`${API_URL}/admin/email-settings/test`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          test_email: testRecipient.trim(),
+          resend_api_key: resendApiKey.trim() || undefined,
+          email_from: resendEmailFrom.trim() || undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to dispatch test email.");
+      setTestResendSuccess(`Live verification email sent successfully to ${testRecipient}! Check your inbox.`);
+    } catch (err) {
+      setTestResendError(err.message || "Failed to send verification email via Resend.");
+    } finally {
+      setTestingResend(false);
+    }
+  };
 
   const fetchDoctors = async () => {
     try {
@@ -817,7 +915,201 @@ WHERE (r.last_sent_at IS NULL OR DATE(r.last_sent_at) < CURRENT_DATE())
         </div>
       )}
 
+      {/* ======================================================== */}
+      {/* TAB 6: RESEND EMAIL API SETTINGS */}
+      {/* ======================================================== */}
+      {activeTab === "email-settings" && (
+        <div className="space-y-8">
+          {/* Header Banner */}
+          <div className="p-8 rounded-3xl bg-gradient-to-r from-royal-purple via-[#1e0d45] to-[#12062b] border border-divine-gold/25 flex flex-col sm:flex-row sm:items-center justify-between gap-6 shadow-2xl">
+            <div>
+              <span className="text-xs uppercase tracking-wider px-3 py-1 rounded-full bg-divine-gold/15 text-divine-gold font-bold border border-divine-gold/30 flex items-center gap-1.5 w-fit">
+                <Mail className="w-3.5 h-3.5" /> Email Delivery Engine
+              </span>
+              <h1 className="text-3xl font-black text-warm-white mt-3">
+                Resend Email API Configuration
+              </h1>
+              <p className="text-sm text-warm-white/70 mt-1 max-w-2xl">
+                Connect your Resend API Key directly from this console to dispatch appointment confirmations, 
+                doctor schedule alerts, and prescription summaries instantly.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 shrink-0">
+              <div className={`px-4 py-2 rounded-xl text-xs font-bold border flex items-center gap-2 ${
+                emailConfig.has_resend 
+                  ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
+                  : "bg-amber-500/15 border-amber-500/30 text-amber-300"
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${emailConfig.has_resend ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+                {emailConfig.has_resend ? "Resend Connected" : "No Resend Key Set"}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Form 1: Save Resend API Key */}
+            <div className="p-6 sm:p-8 rounded-2xl bg-royal-purple/25 border border-divine-gold/20 shadow-xl space-y-6">
+              <div className="flex items-center gap-3 pb-4 border-b border-divine-gold/15">
+                <div className="p-2.5 rounded-xl bg-divine-gold/15 border border-divine-gold/30 text-divine-gold">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-warm-white">Connect Resend API Key</h3>
+                  <p className="text-xs text-warm-white/60">
+                    Paste your Resend API key (`re_...`) to activate transactional delivery.
+                  </p>
+                </div>
+              </div>
+
+              {emailConfig.has_resend && (
+                <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Active Key: <code className="font-mono text-emerald-200">{emailConfig.resend_api_key_masked}</code></span>
+                  </div>
+                  <span className="text-[10px] text-emerald-400/80 uppercase font-bold tracking-wider">Active</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveEmailConfig} className="space-y-4 text-xs">
+                <div>
+                  <label className="block uppercase tracking-wider text-warm-white/70 font-semibold mb-1.5">
+                    Resend API Key *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="re_123456789_abcdefghijklmnopqrstuvwxyz"
+                    value={resendApiKey}
+                    onChange={(e) => setResendApiKey(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-deep-black/60 border border-divine-gold/25 text-cream text-xs font-mono focus:outline-none focus:border-divine-gold transition-all"
+                  />
+                  <p className="text-[11px] text-warm-white/40 mt-1">
+                    Get your free API key at <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" className="text-divine-gold underline">resend.com/api-keys</a>.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block uppercase tracking-wider text-warm-white/70 font-semibold mb-1.5">
+                    Sender Email / From Address
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Atheria Healthcare <onboarding@resend.dev>"
+                    value={resendEmailFrom}
+                    onChange={(e) => setResendEmailFrom(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-deep-black/60 border border-divine-gold/25 text-cream text-xs focus:outline-none focus:border-divine-gold transition-all"
+                  />
+                  <p className="text-[11px] text-warm-white/40 mt-1">
+                    Default is <code className="font-mono text-warm-white/70">Atheria Healthcare &lt;onboarding@resend.dev&gt;</code> for test mode.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingEmailConfig}
+                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-divine-gold to-gold-shimmer hover:from-gold-shimmer hover:to-gold-light text-royal-purple font-bold text-xs shadow-lg shadow-divine-gold/20 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {savingEmailConfig ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Saving & Connecting...
+                    </>
+                  ) : (
+                    <>
+                      <Key className="w-4 h-4" />
+                      Save & Connect Resend Key
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+
+            {/* Form 2: Test Resend Dispatch */}
+            <div className="p-6 sm:p-8 rounded-2xl bg-royal-purple/25 border border-divine-gold/20 shadow-xl space-y-6 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-3 pb-4 border-b border-divine-gold/15">
+                  <div className="p-2.5 rounded-xl bg-divine-gold/15 border border-divine-gold/30 text-divine-gold">
+                    <Send className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-warm-white">Test Live Resend Dispatch</h3>
+                    <p className="text-xs text-warm-white/60">
+                      Send an immediate test email to verify your Resend connection.
+                    </p>
+                  </div>
+                </div>
+
+                {testResendSuccess && (
+                  <div className="mt-4 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{testResendSuccess}</span>
+                  </div>
+                )}
+
+                {testResendError && (
+                  <div className="mt-4 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <span>{testResendError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleTestResendEmail} className="mt-4 space-y-4 text-xs">
+                  <div>
+                    <label className="block uppercase tracking-wider text-warm-white/70 font-semibold mb-1.5">
+                      Recipient Test Email *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="e.g. kavyansh1509@gmail.com"
+                      value={testRecipient}
+                      onChange={(e) => setTestRecipient(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-deep-black/60 border border-divine-gold/25 text-cream text-xs focus:outline-none focus:border-divine-gold transition-all"
+                    />
+                    <p className="text-[11px] text-warm-white/40 mt-1">
+                      Note: On Resend test tier (`onboarding@resend.dev`), emails can only be sent to the email address registered with your Resend account.
+                    </p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={testingResend || !emailConfig.has_resend}
+                    className="w-full py-3.5 rounded-xl bg-royal-purple border border-divine-gold/40 hover:bg-divine-gold/20 text-divine-gold font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {testingResend ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Testing Resend Connection...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        Send Live Test Email
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+
+              {/* Developer Tip */}
+              <div className="p-4 rounded-xl bg-deep-black/40 border border-divine-gold/15 text-[11px] text-warm-white/60 space-y-1 mt-4">
+                <span className="text-divine-gold font-bold block uppercase tracking-wider text-[10px]">
+                  💡 Resend Production Tip
+                </span>
+                <p>
+                  To send to any patient or student domain (e.g. `@vitbhopal.ac.in`, `@gmail.com`), add your custom domain at <a href="https://resend.com/domains" target="_blank" rel="noreferrer" className="text-divine-gold underline font-semibold">resend.com/domains</a> and set Sender Address to <code className="text-warm-white font-mono">no-reply@yourdomain.com</code>.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Doctor Modal */}
+
       {showAddDoctorModal && (
         <div className="fixed inset-0 z-50 bg-deep-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-lg rounded-3xl bg-royal-purple border border-divine-gold/30 p-8 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">

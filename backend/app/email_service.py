@@ -465,18 +465,50 @@ def send_via_mailjet_api(api_key: str, secret_key: str, recipient_email: str, ti
     except Exception as e:
         logger.error(f"[MAILJET API Exception] {e}")
         return False, str(e)
+def get_effective_email_config() -> dict:
+    """Fetches dynamic email configuration from database SystemSetting or settings fallback."""
+    from .database import SessionLocal
+    from .models import SystemSetting
+    resend_key = settings.RESEND_API_KEY
+    email_from = settings.EMAIL_FROM
+    try:
+        db = SessionLocal()
+        rk_row = db.query(SystemSetting).filter(SystemSetting.key == "resend_api_key").first()
+        if rk_row and rk_row.value:
+            resend_key = rk_row.value.strip()
+        ef_row = db.query(SystemSetting).filter(SystemSetting.key == "email_from").first()
+        if ef_row and ef_row.value:
+            email_from = ef_row.value.strip()
+        db.close()
+    except Exception:
+        pass
+    return {
+        "resend_api_key": resend_key or "",
+        "email_from": email_from or "Atheria Healthcare <onboarding@resend.dev>"
+    }
 
 
 def send_email_with_error(recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
     """
     Universal multi-tier email dispatcher.
-    Attempts cloud APIs (SendGrid, Mailjet, Brevo, Resend) over HTTPS (Port 443) to guarantee 
-    delivery on cloud platforms like Render where raw SMTP sockets are firewall-blocked.
+    Prioritizes Resend HTTPS REST API (with dynamic Admin Portal configuration support).
     """
     attempted_providers = []
     errors = []
 
-    # 1. Try SendGrid HTTPS REST API (Port 443) - Zero review hold, single sender verified
+    cfg = get_effective_email_config()
+    resend_key = cfg.get("resend_api_key")
+
+    # 1. Primary: Resend HTTPS REST API (Port 443)
+    if resend_key and resend_key.strip():
+        attempted_providers.append("Resend")
+        res_ok, res_err = send_via_resend_api(resend_key, recipient_email, title, body_text, body_html)
+        if res_ok:
+            return True, None
+        logger.warning(f"[EMAIL FALLBACK] Resend dispatch to {recipient_email} failed ({res_err}). Falling back...")
+        errors.append(f"Resend: {res_err}")
+
+    # 2. Try SendGrid HTTPS REST API (Port 443)
     if settings.SENDGRID_API_KEY and settings.SENDGRID_API_KEY.strip():
         attempted_providers.append("SendGrid")
         sg_ok, sg_err = send_via_sendgrid_api(settings.SENDGRID_API_KEY, recipient_email, title, body_text, body_html)
@@ -484,15 +516,6 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
             return True, None
         logger.warning(f"[EMAIL FALLBACK] SendGrid dispatch to {recipient_email} failed ({sg_err}). Falling back...")
         errors.append(f"SendGrid: {sg_err}")
-
-    # 2. Try Mailjet HTTPS REST API (Port 443)
-    if settings.MAILJET_API_KEY and settings.MAILJET_SECRET_KEY:
-        attempted_providers.append("Mailjet")
-        mj_ok, mj_err = send_via_mailjet_api(settings.MAILJET_API_KEY, settings.MAILJET_SECRET_KEY, recipient_email, title, body_text, body_html)
-        if mj_ok:
-            return True, None
-        logger.warning(f"[EMAIL FALLBACK] Mailjet dispatch to {recipient_email} failed ({mj_err}). Falling back...")
-        errors.append(f"Mailjet: {mj_err}")
 
     # 3. Try Brevo HTTPS REST API (Port 443)
     if settings.BREVO_API_KEY and settings.BREVO_API_KEY.strip():
@@ -503,22 +526,20 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
         logger.warning(f"[EMAIL FALLBACK] Brevo dispatch to {recipient_email} failed ({br_err}). Falling back...")
         errors.append(f"Brevo: {br_err}")
 
-    # 4. Try Resend HTTPS REST API (Port 443)
-    if settings.RESEND_API_KEY and settings.RESEND_API_KEY.strip():
-        attempted_providers.append("Resend")
-        res_ok, res_err = send_via_resend_api(settings.RESEND_API_KEY, recipient_email, title, body_text, body_html)
-        if res_ok:
+    # 4. Try Mailjet HTTPS REST API (Port 443)
+    if settings.MAILJET_API_KEY and settings.MAILJET_SECRET_KEY:
+        attempted_providers.append("Mailjet")
+        mj_ok, mj_err = send_via_mailjet_api(settings.MAILJET_API_KEY, settings.MAILJET_SECRET_KEY, recipient_email, title, body_text, body_html)
+        if mj_ok:
             return True, None
-        logger.warning(f"[EMAIL FALLBACK] Resend dispatch to {recipient_email} failed ({res_err}). Falling back...")
-        errors.append(f"Resend: {res_err}")
+        logger.warning(f"[EMAIL FALLBACK] Mailjet dispatch to {recipient_email} failed ({mj_err}). Falling back...")
+        errors.append(f"Mailjet: {mj_err}")
 
     # 5. Standard SMTP Dispatch (Gmail / TLS / SSL)
     username = (settings.EMAIL_USERNAME or "").strip()
     password = (settings.EMAIL_PASSWORD or "").replace(" ", "").replace('"', '').replace("'", "").strip()
     host = (settings.EMAIL_HOST or "smtp.gmail.com").strip()
     primary_port = int(settings.EMAIL_PORT or 587)
-
-
     
     # Graceful mock handling when credentials are empty and no cloud API was configured
     if not username or not password:
@@ -536,7 +557,7 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
         
     attempted_providers.append(f"SMTP ({host})")
     msg = MIMEMultipart("alternative")
-    from_display = f"Atheria Healthcare <{username}>" if username else (settings.EMAIL_FROM or "no-reply@atheria-health.com")
+    from_display = f"Atheria Healthcare <{username}>" if username else (cfg.get("email_from") or settings.EMAIL_FROM or "no-reply@atheria-health.com")
     msg['From'] = from_display
     msg['To'] = recipient_email
     msg['Subject'] = title
@@ -591,6 +612,7 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
 
 
 def dispatch_notification_immediately(notification_id: int) -> None:
+
     """
     Dispatches a pending notification immediately in a background thread
     so the user/patient does not have to wait for the 30-second APScheduler tick.
