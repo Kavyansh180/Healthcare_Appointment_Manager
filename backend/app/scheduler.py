@@ -1,0 +1,122 @@
+import logging
+from datetime import datetime, time, date
+from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy.orm import Session
+
+from .database import SessionLocal
+from .models import Notification, Reminder, Prescription, Appointment, User
+from .email_service import send_email_smtp
+
+logger = logging.getLogger("SCHEDULER")
+scheduler = BackgroundScheduler()
+
+def process_email_queue():
+    """
+    Scans the notifications table and attempts to send pending or retriable emails.
+    """
+    logger.info("Background Job: Processing email queue...")
+    db = SessionLocal()
+    try:
+        # Get notifications that are pending or failed with fewer than 3 retries
+        pending_notifications = db.query(Notification).filter(
+            Notification.status.in_(["pending", "failed"]),
+            Notification.retry_count < 3
+        ).all()
+        
+        for noti in pending_notifications:
+            logger.info(f"Attempting to send email id={noti.id} to {noti.recipient_email} (Attempt {noti.retry_count + 1})...")
+            noti.last_attempt = datetime.utcnow()
+            
+            success = send_email_smtp(noti.recipient_email, noti.title, noti.message)
+            if success:
+                noti.status = "sent"
+                noti.error_message = None
+                logger.info(f"Email id={noti.id} sent successfully.")
+            else:
+                noti.retry_count += 1
+                noti.status = "failed"
+                noti.error_message = "SMTP Connection failed"
+                logger.error(f"Email id={noti.id} failed.")
+                
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error in process_email_queue: {e}")
+    finally:
+        db.close()
+
+def send_medication_reminders():
+    """
+    Checks medication reminders for the current hour/minute and dispatches emails.
+    """
+    logger.info("Background Job: Checking medication reminders...")
+    db = SessionLocal()
+    try:
+        now = datetime.now()
+        current_time = now.time()
+        today_date = now.date()
+        
+        # We query all reminders
+        reminders = db.query(Reminder).join(Reminder.prescription).join(Prescription.appointment).all()
+        
+        for reminder in reminders:
+            # Check if reminder_time is due (we check if it's within the current hour and minute)
+            # Or simpler: if reminder.reminder_time.hour == now.hour and reminder.reminder_time.minute == now.minute
+            # To be safe for short polls, we check if the reminder was already sent today
+            # If not sent today, and current time is past the reminder time:
+            
+            already_sent_today = False
+            if reminder.last_sent_at:
+                already_sent_today = reminder.last_sent_at.date() == today_date
+                
+            if not already_sent_today and current_time >= reminder.reminder_time:
+                # Retrieve patient details
+                appt = reminder.prescription.appointment
+                patient = appt.patient
+                
+                logger.info(f"Triggering medication reminder id={reminder.id} for {patient.name} ({reminder.medication_name})")
+                
+                # Create a notification in the DB
+                rem_msg = (
+                    f"Dear {patient.name},\n\n"
+                    f"This is your scheduled reminder to take your medication:\n"
+                    f"- Medicine: {reminder.medication_name}\n"
+                    f"- Frequency: {reminder.frequency}\n"
+                    f"- Scheduled Time: {reminder.reminder_time.strftime('%H:%M')}\n\n"
+                    f"Please follow the instructions provided by Dr. {appt.doctor.user.name}.\n\n"
+                    f"Regards,\n"
+                    f"Healthcare Management System"
+                )
+                
+                notification = Notification(
+                    user_id=patient.id,
+                    title=f"Medication Reminder: {reminder.medication_name}",
+                    message=rem_msg,
+                    recipient_email=patient.email,
+                    status="pending"
+                )
+                db.add(notification)
+                
+                # Update reminder state
+                reminder.last_sent_at = datetime.utcnow()
+                
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error in send_medication_reminders: {e}")
+    finally:
+        db.close()
+
+def start_scheduler():
+    # Process email queue every 30 seconds
+    scheduler.add_job(process_email_queue, 'interval', seconds=30, id='email_queue_job', replace_existing=True)
+    
+    # Process medication reminders every 60 seconds
+    scheduler.add_job(send_medication_reminders, 'interval', seconds=60, id='medication_reminder_job', replace_existing=True)
+    
+    scheduler.start()
+    logger.info("APScheduler background jobs started successfully.")
+
+def shutdown_scheduler():
+    scheduler.shutdown()
+    logger.info("APScheduler background jobs shut down.")
