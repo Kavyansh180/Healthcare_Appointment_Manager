@@ -391,10 +391,14 @@ def send_via_sendgrid_api(api_key: str, recipient_email: str, title: str, body_t
         return False, str(e)
 
 def send_via_brevo_api(api_key: str, recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
-    """Dispatches email via Brevo REST API (HTTPS Port 443)."""
+    """Dispatches email via Brevo REST API (HTTPS Port 443 - Never blocked on Render/AWS/Vercel)."""
     import requests
+    import re
     try:
-        sender_email = settings.EMAIL_FROM or "no-reply@atheria-health.com"
+        raw_sender = (settings.EMAIL_FROM or settings.EMAIL_USERNAME or "kavyansh1509@gmail.com").strip()
+        m = re.search(r'<([^>]+)>', raw_sender)
+        sender_email = m.group(1).strip() if m else raw_sender
+        
         payload = {
             "sender": {"name": "Atheria Healthcare", "email": sender_email},
             "to": [{"email": recipient_email}],
@@ -418,6 +422,7 @@ def send_via_brevo_api(api_key: str, recipient_email: str, title: str, body_text
     except Exception as e:
         logger.error(f"[BREVO API Exception] {e}")
         return False, str(e)
+
 
 def send_email_with_error(recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
     """
