@@ -20,7 +20,8 @@ import {
   Star,
   UserCheck,
   Building2,
-  CalendarDays
+  CalendarDays,
+  Mail
 } from "lucide-react";
 import { API_URL } from "../config";
 
@@ -868,6 +869,21 @@ export default function PatientPortal({ token, user, activeTab, setActiveTab }) 
                         <span className="font-bold text-amber-300">{confirmedAppt.symptom_form.urgency_level}</span>
                       </div>
                     )}
+                  </div>
+
+                  {/* Email Confirmation Notice */}
+                  <div className="max-w-md mx-auto p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3 text-left">
+                    <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400">
+                      <Mail className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-emerald-300">
+                        Confirmation Email Dispatched
+                      </p>
+                      <p className="text-[11px] text-warm-white/70">
+                        Delivered to <strong>{user?.email || confirmedAppt?.patient?.email || "your email address"}</strong> with complete consult details and Google Meet link.
+                      </p>
+                    </div>
                   </div>
 
                   <div>

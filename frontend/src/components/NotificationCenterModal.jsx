@@ -156,7 +156,7 @@ export default function NotificationCenterModal({ isOpen, onClose, token, user }
                 </span>
               </div>
               <p className="text-xs text-warm-white/60">
-                Multi-mode email delivery engine • SMTP TLS/SSL • HTML Luxury Templates
+                Universal delivery engine • Gmail SMTP TLS/SSL • Instant Dispatch & APScheduler Retry Net
               </p>
             </div>
           </div>

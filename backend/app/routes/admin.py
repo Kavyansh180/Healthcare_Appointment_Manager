@@ -8,7 +8,11 @@ from ..models import User, Doctor, DoctorAvailability, DoctorLeave, Appointment,
 from ..schemas import DoctorCreate, DoctorProfileResponse, DoctorAvailabilityCreate, DoctorAvailabilityResponse, DoctorLeaveCreate, DoctorLeaveResponse, UserCreate
 from ..auth import RoleChecker, get_password_hash
 from ..calendar_service import delete_appointment_calendar_event
-from ..email_service import get_leave_cancellation_patient_html, get_leave_cancellation_doctor_html
+from ..email_service import (
+    get_leave_cancellation_patient_html, 
+    get_leave_cancellation_doctor_html,
+    dispatch_notification_immediately
+)
 
 router = APIRouter(prefix="/admin", tags=["Admin Portal"])
 admin_required = Depends(RoleChecker(["admin"]))
@@ -206,6 +210,7 @@ def add_doctor_leave(
     ).all()
     
     affected_count = 0
+    notifications_to_dispatch = []
     for appt in conflicting_appointments:
         if appt.slot_start.date() == leave_in.leave_date:
             # 1. Update appointment status to cancelled
@@ -242,6 +247,8 @@ def add_doctor_leave(
                 status="pending"
             )
             db.add(patient_notification)
+            db.flush()
+            notifications_to_dispatch.append(patient_notification.id)
             
             # 3. Queue Email notification for Doctor
             doctor_msg = (
@@ -267,6 +274,8 @@ def add_doctor_leave(
                 status="pending"
             )
             db.add(doctor_notification)
+            db.flush()
+            notifications_to_dispatch.append(doctor_notification.id)
             
             # Delete Google Calendar event
             try:
@@ -275,5 +284,13 @@ def add_doctor_leave(
                 print(f"Failed to delete Google Calendar event: {e}")
 
     db.commit()
+    
+    # Immediately trigger non-blocking email dispatches
+    for nid in notifications_to_dispatch:
+        try:
+            dispatch_notification_immediately(nid)
+        except Exception as dispatch_err:
+            print(f"Non-blocking dispatch error (will retry via scheduler): {dispatch_err}")
+
     db.refresh(leave)
     return leave

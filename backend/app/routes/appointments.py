@@ -12,7 +12,8 @@ from ..calendar_service import create_appointment_calendar_event, delete_appoint
 from ..email_service import (
     get_booking_confirmation_html,
     get_doctor_new_booking_html,
-    get_appointment_cancelled_html
+    get_appointment_cancelled_html,
+    dispatch_notification_immediately
 )
 
 router = APIRouter(prefix="/appointments", tags=["Appointments & Booking"])
@@ -248,6 +249,13 @@ def confirm_booking(
         
         db.commit()
         
+        # Immediately trigger non-blocking email dispatch to patient and doctor
+        try:
+            dispatch_notification_immediately(patient_noti.id)
+            dispatch_notification_immediately(doctor_noti.id)
+        except Exception as dispatch_err:
+            print(f"Non-blocking dispatch error (will retry via scheduler): {dispatch_err}")
+        
         # Fetch the full appointment profile to return
         res = db.query(Appointment).filter(Appointment.id == appointment.id).first()
         return res
@@ -317,5 +325,13 @@ def cancel_appointment(
     db.add(doctor_noti)
     
     db.commit()
+    
+    # Immediately trigger non-blocking email dispatch for cancellation
+    try:
+        dispatch_notification_immediately(patient_noti.id)
+        dispatch_notification_immediately(doctor_noti.id)
+    except Exception as dispatch_err:
+        print(f"Non-blocking dispatch error (will retry via scheduler): {dispatch_err}")
+
     db.refresh(appointment)
     return appointment

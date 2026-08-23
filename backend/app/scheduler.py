@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from .database import SessionLocal
 from .models import Notification, Reminder, Prescription, Appointment, User
-from .email_service import send_email_smtp, get_medication_reminder_html
+from .email_service import send_email_with_error, get_medication_reminder_html
 
 logger = logging.getLogger("SCHEDULER")
 scheduler = BackgroundScheduler()
@@ -13,6 +13,7 @@ scheduler = BackgroundScheduler()
 def process_email_queue():
     """
     Scans the notifications table and attempts to send pending or retriable emails.
+    Acts as a resilient secondary safety net for all notifications.
     """
     logger.info("Background Job: Processing email queue...")
     db = SessionLocal()
@@ -27,7 +28,7 @@ def process_email_queue():
             logger.info(f"Attempting to send email id={noti.id} to {noti.recipient_email} (Attempt {noti.retry_count + 1})...")
             noti.last_attempt = datetime.utcnow()
             
-            success = send_email_smtp(
+            success, err_msg = send_email_with_error(
                 recipient_email=noti.recipient_email,
                 title=noti.title,
                 body_text=noti.message,
@@ -40,8 +41,8 @@ def process_email_queue():
             else:
                 noti.retry_count += 1
                 noti.status = "failed"
-                noti.error_message = "SMTP Connection failed"
-                logger.error(f"Email id={noti.id} failed.")
+                noti.error_message = err_msg or "Email dispatch failed"
+                logger.error(f"Email id={noti.id} failed: {err_msg}")
                 
         db.commit()
     except Exception as e:

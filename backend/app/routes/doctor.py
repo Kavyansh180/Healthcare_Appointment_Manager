@@ -10,7 +10,7 @@ from ..models import User, Doctor, Appointment, Prescription, Reminder, Notifica
 from ..schemas import AppointmentResponse, PrescriptionResponse
 from ..auth import RoleChecker, get_current_user
 from ..llm import generate_patient_friendly_summary
-from ..email_service import get_post_visit_prescription_html
+from ..email_service import get_post_visit_prescription_html, dispatch_notification_immediately
 
 router = APIRouter(prefix="/doctor", tags=["Doctor Portal"])
 doctor_required = RoleChecker(["doctor"])
@@ -164,6 +164,13 @@ def submit_prescription(
     db.add(notification)
     
     db.commit()
+    
+    # Immediately trigger non-blocking email dispatch to patient
+    try:
+        dispatch_notification_immediately(notification.id)
+    except Exception as dispatch_err:
+        print(f"Non-blocking dispatch error (will retry via scheduler): {dispatch_err}")
+
     db.refresh(prescription)
     return prescription
 

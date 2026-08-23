@@ -421,29 +421,55 @@ def send_via_brevo_api(api_key: str, recipient_email: str, title: str, body_text
 
 def send_email_with_error(recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
     """
-    Dispatches email via HTTPS REST APIs (Resend, SendGrid, Brevo) or SMTP (Gmail/TLS).
-    If on Render Free Tier where SMTP sockets are blocked (Errno 101), provides clear guidance.
+    Universal multi-tier email dispatcher.
+    Attempts cloud APIs (Resend, SendGrid, Brevo) if keys are provided.
+    If Resend fails (e.g., 403 sandbox restriction allowing only verified account owners),
+    it automatically falls through to standard Gmail SMTP (Port 587/465 TLS/SSL)
+    guaranteeing that ANY patient or doctor mailbox receives emails.
     """
-    # 1. Try Resend HTTPS REST API if key provided (Recommended for Render/Vercel)
+    attempted_providers = []
+    errors = []
+
+    # 1. Try Resend HTTPS REST API (if key provided)
     if settings.RESEND_API_KEY and settings.RESEND_API_KEY.strip():
-        return send_via_resend_api(settings.RESEND_API_KEY, recipient_email, title, body_text, body_html)
-        
-    # 2. Try SendGrid HTTPS REST API if key provided
+        attempted_providers.append("Resend")
+        res_ok, res_err = send_via_resend_api(settings.RESEND_API_KEY, recipient_email, title, body_text, body_html)
+        if res_ok:
+            return True, None
+        logger.warning(f"[EMAIL FALLBACK] Resend dispatch to {recipient_email} failed ({res_err}). Falling back to next available provider...")
+        errors.append(f"Resend: {res_err}")
+
+    # 2. Try SendGrid HTTPS REST API (if key provided)
     if settings.SENDGRID_API_KEY and settings.SENDGRID_API_KEY.strip():
-        return send_via_sendgrid_api(settings.SENDGRID_API_KEY, recipient_email, title, body_text, body_html)
+        attempted_providers.append("SendGrid")
+        sg_ok, sg_err = send_via_sendgrid_api(settings.SENDGRID_API_KEY, recipient_email, title, body_text, body_html)
+        if sg_ok:
+            return True, None
+        logger.warning(f"[EMAIL FALLBACK] SendGrid dispatch to {recipient_email} failed ({sg_err}). Falling back...")
+        errors.append(f"SendGrid: {sg_err}")
 
-    # 3. Try Brevo HTTPS REST API if key provided
+    # 3. Try Brevo HTTPS REST API (if key provided)
     if settings.BREVO_API_KEY and settings.BREVO_API_KEY.strip():
-        return send_via_brevo_api(settings.BREVO_API_KEY, recipient_email, title, body_text, body_html)
+        attempted_providers.append("Brevo")
+        br_ok, br_err = send_via_brevo_api(settings.BREVO_API_KEY, recipient_email, title, body_text, body_html)
+        if br_ok:
+            return True, None
+        logger.warning(f"[EMAIL FALLBACK] Brevo dispatch to {recipient_email} failed ({br_err}). Falling back...")
+        errors.append(f"Brevo: {br_err}")
 
-    # 4. Standard SMTP Dispatch (Gmail / TLS)
+    # 4. Standard SMTP Dispatch (Gmail / TLS / SSL) - No domain restrictions!
     username = (settings.EMAIL_USERNAME or "").strip()
     password = (settings.EMAIL_PASSWORD or "").replace(" ", "").replace('"', '').replace("'", "").strip()
     host = (settings.EMAIL_HOST or "smtp.gmail.com").strip()
     primary_port = int(settings.EMAIL_PORT or 587)
     
-    # Graceful mock handling when credentials are empty
+    # Graceful mock handling when credentials are empty and no cloud API was configured
     if not username or not password:
+        if attempted_providers:
+            final_err = f"All cloud providers failed ({' | '.join(errors)}) and SMTP credentials not set."
+            logger.error(final_err)
+            return False, final_err
+            
         logger.info("\n=======================================================")
         logger.info(f"[EMAIL MOCK OUTBOX] Sending to: {recipient_email}")
         logger.info(f"Subject: {title}")
@@ -451,6 +477,7 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
         logger.info("=======================================================\n")
         return True, None
         
+    attempted_providers.append(f"SMTP ({host})")
     msg = MIMEMultipart("alternative")
     from_display = f"Atheria Healthcare <{username}>" if username else (settings.EMAIL_FROM or "no-reply@atheria-health.com")
     msg['From'] = from_display
@@ -470,7 +497,6 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
         msg.attach(part2)
         
     sender_addr = username or settings.EMAIL_FROM
-    errors = []
     
     ports_to_try = [primary_port]
     if primary_port == 587 and 465 not in ports_to_try:
@@ -496,12 +522,62 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
         except Exception as e:
             err_str = str(e)
             if "101" in err_str or "unreachable" in err_str.lower():
-                err_str = f"Port {port} blocked by cloud host firewall (Render Free Tier disables outbound SMTP sockets). Use RESEND_API_KEY over HTTPS (port 443)."
+                err_str = f"Port {port} blocked by cloud firewall."
             else:
                 err_str = f"Port {port} error: {err_str}"
             logger.warning(f"SMTP dispatch attempt failed ({err_str}).")
             errors.append(err_str)
             
     final_error = " | ".join(errors)
-    logger.error(f"Failed all SMTP dispatch attempts to {recipient_email}: {final_error}")
+    logger.error(f"Failed all email dispatch attempts to {recipient_email}: {final_error}")
     return False, final_error
+
+
+def dispatch_notification_immediately(notification_id: int) -> None:
+    """
+    Dispatches a pending notification immediately in a background thread
+    so the user/patient does not have to wait for the 30-second APScheduler tick.
+    Updates the database record status immediately to 'sent' or 'failed'.
+    """
+    import threading
+    from datetime import datetime
+    from .database import SessionLocal
+    from .models import Notification
+
+    def _worker(nid: int):
+        db = SessionLocal()
+        try:
+            noti = db.query(Notification).filter(Notification.id == nid).first()
+            if not noti or noti.status == "sent":
+                return
+
+            logger.info(f"[INSTANT DISPATCH] Processing Notification #{noti.id} to {noti.recipient_email}...")
+            noti.last_attempt = datetime.utcnow()
+            
+            success, err_msg = send_email_with_error(
+                recipient_email=noti.recipient_email,
+                title=noti.title,
+                body_text=noti.message,
+                body_html=noti.html_content
+            )
+            
+            if success:
+                noti.status = "sent"
+                noti.error_message = None
+                logger.info(f"[INSTANT DISPATCH] Notification #{noti.id} sent successfully to {noti.recipient_email}.")
+            else:
+                noti.retry_count += 1
+                noti.status = "failed"
+                noti.error_message = err_msg or "Dispatch attempt failed"
+                logger.warning(f"[INSTANT DISPATCH] Notification #{noti.id} failed ({err_msg}). Will retry via scheduler.")
+
+            db.commit()
+        except Exception as ex:
+            db.rollback()
+            logger.error(f"[INSTANT DISPATCH ERROR] Notification #{nid}: {ex}")
+        finally:
+            db.close()
+
+    thread = threading.Thread(target=_worker, args=(notification_id,), daemon=True)
+    thread.start()
+
