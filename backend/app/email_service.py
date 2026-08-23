@@ -429,34 +429,54 @@ def send_via_brevo_api(api_key: str, recipient_email: str, title: str, body_text
         return False, str(e)
 
 
+def send_via_mailjet_api(api_key: str, secret_key: str, recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
+    """Dispatches email via Mailjet REST API v3.1 (HTTPS Port 443)."""
+    import requests
+    import re
+    try:
+        raw_sender = (settings.EMAIL_FROM or settings.EMAIL_USERNAME or "kavyansh1509@gmail.com").strip()
+        m = re.search(r'<([^>]+)>', raw_sender)
+        sender_email = m.group(1).strip() if m else raw_sender
+        
+        payload = {
+            "Messages": [
+                {
+                    "From": {"Email": sender_email, "Name": "Atheria Healthcare"},
+                    "To": [{"Email": recipient_email}],
+                    "Subject": title,
+                    "TextPart": body_text,
+                    "HTMLPart": body_html or f"<p>{body_text.replace(chr(10), '<br/>')}</p>"
+                }
+            ]
+        }
+        res = requests.post(
+            "https://api.mailjet.com/v3.1/send",
+            auth=(api_key.strip(), secret_key.strip()),
+            json=payload,
+            timeout=10
+        )
+        if res.status_code in [200, 201]:
+            logger.info(f"[MAILJET API] Email successfully sent to {recipient_email}")
+            return True, None
+        else:
+            err_msg = f"Mailjet API error ({res.status_code}): {res.text}"
+            logger.error(err_msg)
+            return False, err_msg
+    except Exception as e:
+        logger.error(f"[MAILJET API Exception] {e}")
+        return False, str(e)
+
+
 def send_email_with_error(recipient_email: str, title: str, body_text: str, body_html: Optional[str] = None) -> tuple[bool, Optional[str]]:
     """
     Universal multi-tier email dispatcher.
-    Attempts cloud APIs (Brevo, Resend, SendGrid) over HTTPS (Port 443) to guarantee 
+    Attempts cloud APIs (SendGrid, Mailjet, Brevo, Resend) over HTTPS (Port 443) to guarantee 
     delivery on cloud platforms like Render where raw SMTP sockets are firewall-blocked.
     """
     attempted_providers = []
     errors = []
 
-    # 1. Try Brevo HTTPS REST API (Port 443) - Recommended for Render (No domain verification needed, delivers to ANY inbox)
-    if settings.BREVO_API_KEY and settings.BREVO_API_KEY.strip():
-        attempted_providers.append("Brevo")
-        br_ok, br_err = send_via_brevo_api(settings.BREVO_API_KEY, recipient_email, title, body_text, body_html)
-        if br_ok:
-            return True, None
-        logger.warning(f"[EMAIL FALLBACK] Brevo dispatch to {recipient_email} failed ({br_err}). Falling back...")
-        errors.append(f"Brevo: {br_err}")
-
-    # 2. Try Resend HTTPS REST API (if key provided)
-    if settings.RESEND_API_KEY and settings.RESEND_API_KEY.strip():
-        attempted_providers.append("Resend")
-        res_ok, res_err = send_via_resend_api(settings.RESEND_API_KEY, recipient_email, title, body_text, body_html)
-        if res_ok:
-            return True, None
-        logger.warning(f"[EMAIL FALLBACK] Resend dispatch to {recipient_email} failed ({res_err}). Falling back...")
-        errors.append(f"Resend: {res_err}")
-
-    # 3. Try SendGrid HTTPS REST API (if key provided)
+    # 1. Try SendGrid HTTPS REST API (Port 443) - Zero review hold, single sender verified
     if settings.SENDGRID_API_KEY and settings.SENDGRID_API_KEY.strip():
         attempted_providers.append("SendGrid")
         sg_ok, sg_err = send_via_sendgrid_api(settings.SENDGRID_API_KEY, recipient_email, title, body_text, body_html)
@@ -465,11 +485,39 @@ def send_email_with_error(recipient_email: str, title: str, body_text: str, body
         logger.warning(f"[EMAIL FALLBACK] SendGrid dispatch to {recipient_email} failed ({sg_err}). Falling back...")
         errors.append(f"SendGrid: {sg_err}")
 
-    # 4. Standard SMTP Dispatch (Gmail / TLS / SSL)
+    # 2. Try Mailjet HTTPS REST API (Port 443)
+    if settings.MAILJET_API_KEY and settings.MAILJET_SECRET_KEY:
+        attempted_providers.append("Mailjet")
+        mj_ok, mj_err = send_via_mailjet_api(settings.MAILJET_API_KEY, settings.MAILJET_SECRET_KEY, recipient_email, title, body_text, body_html)
+        if mj_ok:
+            return True, None
+        logger.warning(f"[EMAIL FALLBACK] Mailjet dispatch to {recipient_email} failed ({mj_err}). Falling back...")
+        errors.append(f"Mailjet: {mj_err}")
+
+    # 3. Try Brevo HTTPS REST API (Port 443)
+    if settings.BREVO_API_KEY and settings.BREVO_API_KEY.strip():
+        attempted_providers.append("Brevo")
+        br_ok, br_err = send_via_brevo_api(settings.BREVO_API_KEY, recipient_email, title, body_text, body_html)
+        if br_ok:
+            return True, None
+        logger.warning(f"[EMAIL FALLBACK] Brevo dispatch to {recipient_email} failed ({br_err}). Falling back...")
+        errors.append(f"Brevo: {br_err}")
+
+    # 4. Try Resend HTTPS REST API (Port 443)
+    if settings.RESEND_API_KEY and settings.RESEND_API_KEY.strip():
+        attempted_providers.append("Resend")
+        res_ok, res_err = send_via_resend_api(settings.RESEND_API_KEY, recipient_email, title, body_text, body_html)
+        if res_ok:
+            return True, None
+        logger.warning(f"[EMAIL FALLBACK] Resend dispatch to {recipient_email} failed ({res_err}). Falling back...")
+        errors.append(f"Resend: {res_err}")
+
+    # 5. Standard SMTP Dispatch (Gmail / TLS / SSL)
     username = (settings.EMAIL_USERNAME or "").strip()
     password = (settings.EMAIL_PASSWORD or "").replace(" ", "").replace('"', '').replace("'", "").strip()
     host = (settings.EMAIL_HOST or "smtp.gmail.com").strip()
     primary_port = int(settings.EMAIL_PORT or 587)
+
 
     
     # Graceful mock handling when credentials are empty and no cloud API was configured

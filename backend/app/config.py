@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
     SENDGRID_API_KEY: str = os.getenv("SENDGRID_API_KEY", "")
     BREVO_API_KEY: str = os.getenv("BREVO_API_KEY", "")
+    MAILJET_API_KEY: str = os.getenv("MAILJET_API_KEY", "")
+    MAILJET_SECRET_KEY: str = os.getenv("MAILJET_SECRET_KEY", "")
 
     # Google OAuth
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
