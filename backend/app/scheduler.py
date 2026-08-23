@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from .database import SessionLocal
 from .models import Notification, Reminder, Prescription, Appointment, User
-from .email_service import send_email_smtp
+from .email_service import send_email_smtp, get_medication_reminder_html
 
 logger = logging.getLogger("SCHEDULER")
 scheduler = BackgroundScheduler()
@@ -27,7 +27,12 @@ def process_email_queue():
             logger.info(f"Attempting to send email id={noti.id} to {noti.recipient_email} (Attempt {noti.retry_count + 1})...")
             noti.last_attempt = datetime.utcnow()
             
-            success = send_email_smtp(noti.recipient_email, noti.title, noti.message)
+            success = send_email_smtp(
+                recipient_email=noti.recipient_email,
+                title=noti.title,
+                body_text=noti.message,
+                body_html=noti.html_content
+            )
             if success:
                 noti.status = "sent"
                 noti.error_message = None
@@ -60,11 +65,6 @@ def send_medication_reminders():
         reminders = db.query(Reminder).join(Reminder.prescription).join(Prescription.appointment).all()
         
         for reminder in reminders:
-            # Check if reminder_time is due (we check if it's within the current hour and minute)
-            # Or simpler: if reminder.reminder_time.hour == now.hour and reminder.reminder_time.minute == now.minute
-            # To be safe for short polls, we check if the reminder was already sent today
-            # If not sent today, and current time is past the reminder time:
-            
             already_sent_today = False
             if reminder.last_sent_at:
                 already_sent_today = reminder.last_sent_at.date() == today_date
@@ -73,25 +73,34 @@ def send_medication_reminders():
                 # Retrieve patient details
                 appt = reminder.prescription.appointment
                 patient = appt.patient
+                doc_name = appt.doctor.user.name if appt.doctor and appt.doctor.user else "Attending Specialist"
                 
                 logger.info(f"Triggering medication reminder id={reminder.id} for {patient.name} ({reminder.medication_name})")
                 
-                # Create a notification in the DB
                 rem_msg = (
                     f"Dear {patient.name},\n\n"
                     f"This is your scheduled reminder to take your medication:\n"
                     f"- Medicine: {reminder.medication_name}\n"
                     f"- Frequency: {reminder.frequency}\n"
                     f"- Scheduled Time: {reminder.reminder_time.strftime('%H:%M')}\n\n"
-                    f"Please follow the instructions provided by Dr. {appt.doctor.user.name}.\n\n"
+                    f"Please follow the instructions provided by Dr. {doc_name}.\n\n"
                     f"Regards,\n"
-                    f"Healthcare Management System"
+                    f"Atheria Healthcare System"
+                )
+                
+                rem_html = get_medication_reminder_html(
+                    patient_name=patient.name,
+                    doctor_name=doc_name,
+                    medicine_name=reminder.medication_name,
+                    frequency=reminder.frequency,
+                    reminder_time=reminder.reminder_time.strftime('%H:%M')
                 )
                 
                 notification = Notification(
                     user_id=patient.id,
                     title=f"Medication Reminder: {reminder.medication_name}",
                     message=rem_msg,
+                    html_content=rem_html,
                     recipient_email=patient.email,
                     status="pending"
                 )

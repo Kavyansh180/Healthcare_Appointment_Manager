@@ -4,19 +4,22 @@ import Navbar from "./components/Navbar";
 import AdminPortal from "./components/AdminPortal";
 import PatientPortal from "./components/PatientPortal";
 import DoctorPortal from "./components/DoctorPortal";
+import NotificationCenterModal from "./components/NotificationCenterModal";
 import { API_URL } from "./config";
 
 function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
 
   // Check LocalStorage on startup
   useEffect(() => {
-    const storedUser = localStorage.getItem("aetheria_user");
+    const storedUser = localStorage.getItem("atheria_user") || localStorage.getItem("aetheria_user");
     if (storedUser) {
       try {
         setUser(JSON.parse(storedUser));
       } catch (e) {
+        localStorage.removeItem("atheria_user");
         localStorage.removeItem("aetheria_user");
       }
     }
@@ -25,12 +28,13 @@ function App() {
   const handleLoginSuccess = (userData) => {
     setUser(userData);
     setActiveTab("overview");
-    localStorage.setItem("aetheria_user", JSON.stringify(userData));
+    localStorage.setItem("atheria_user", JSON.stringify(userData));
   };
 
   const handleLogout = () => {
     setUser(null);
     setActiveTab("overview");
+    localStorage.removeItem("atheria_user");
     localStorage.removeItem("aetheria_user");
     window.history.replaceState({}, document.title, "/");
   };
@@ -63,6 +67,7 @@ function App() {
         setActiveTab={setActiveTab}
         onLogout={handleLogout}
         onQuickSwitch={handleQuickSwitch}
+        onOpenNotifications={() => setIsNotificationOpen(true)}
       />
 
       {/* Main Portal Body */}
@@ -73,6 +78,7 @@ function App() {
             user={user}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
+            onOpenNotifications={() => setIsNotificationOpen(true)}
           />
         )}
         {user.role === "doctor" && (
@@ -81,6 +87,7 @@ function App() {
             user={user}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
+            onOpenNotifications={() => setIsNotificationOpen(true)}
           />
         )}
         {user.role === "patient" && (
@@ -89,14 +96,23 @@ function App() {
             user={user}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
+            onOpenNotifications={() => setIsNotificationOpen(true)}
           />
         )}
       </main>
 
+      {/* Live Email Notification Outbox Modal */}
+      <NotificationCenterModal
+        isOpen={isNotificationOpen}
+        onClose={() => setIsNotificationOpen(false)}
+        token={user.access_token}
+        user={user}
+      />
+
       {/* Global Footer */}
       <footer className="py-6 border-t border-divine-gold/10 bg-[#090315] text-center text-xs text-warm-white/40">
         <p>
-          Aetheria Healthcare Suite • Concurrency Engine with Pessimistic Row Locking & Groq LLaMA 3.3 70B AI
+          Atheria Healthcare Suite • Concurrency Engine with Pessimistic Row Locking & Groq LLaMA 3.3 70B AI
         </p>
       </footer>
     </div>

@@ -16,6 +16,7 @@ from .routes.admin import router as admin_router
 from .routes.doctor import router as doctor_router
 from .routes.patient import router as patient_router
 from .routes.appointments import router as appointments_router
+from .routes.notifications import router as notifications_router
 from datetime import time
 
 # Configure logging
@@ -337,3 +338,4 @@ app.include_router(admin_router, prefix="/api/v1")
 app.include_router(doctor_router, prefix="/api/v1")
 app.include_router(patient_router, prefix="/api/v1")
 app.include_router(appointments_router, prefix="/api/v1")
+app.include_router(notifications_router, prefix="/api/v1")

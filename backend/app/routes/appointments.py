@@ -8,7 +8,12 @@ from ..models import User, Doctor, Appointment, SlotHold, SymptomForm, Notificat
 from ..schemas import AppointmentResponse, SlotHoldCreate, SlotHoldResponse, AppointmentCreate
 from ..auth import RoleChecker, get_current_user
 from ..llm import generate_pre_visit_summary
-from ..calendar_service import create_appointment_calendar_event
+from ..calendar_service import create_appointment_calendar_event, delete_appointment_calendar_event
+from ..email_service import (
+    get_booking_confirmation_html,
+    get_doctor_new_booking_html,
+    get_appointment_cancelled_html
+)
 
 router = APIRouter(prefix="/appointments", tags=["Appointments & Booking"])
 patient_required = RoleChecker(["patient"])
@@ -178,21 +183,33 @@ def confirm_booking(
         doctor = db.query(Doctor).filter(Doctor.id == booking_in.doctor_id).first()
         
         # 7. Queue Email Notifications
+        slot_str = booking_in.slot_start.strftime('%Y-%m-%d %H:%M')
+        
         # To Patient
         patient_msg = (
             f"Dear {current_user.name},\n\n"
             f"Your appointment with Dr. {doctor.user.name} has been successfully BOOKED.\n"
-            f"Time: {booking_in.slot_start.strftime('%Y-%m-%d %H:%M')}\n\n"
+            f"Time: {slot_str}\n\n"
             f"We have analysed your symptoms and generated a pre-visit overview for the doctor.\n"
             f"Symptom Urgency: {ai_summary['urgency_level']}\n"
             f"Chief Complaint: {ai_summary['chief_complaint']}\n\n"
             f"Regards,\n"
-            f"Healthcare Management System"
+            f"Atheria Healthcare Systems"
+        )
+        patient_html = get_booking_confirmation_html(
+            patient_name=current_user.name,
+            doctor_name=doctor.user.name,
+            specialty=doctor.specialisation,
+            slot_time=slot_str,
+            urgency=ai_summary['urgency_level'],
+            chief_complaint=ai_summary['chief_complaint'],
+            meet_link=appointment.meet_link
         )
         patient_noti = Notification(
             user_id=current_user.id,
             title="Appointment Confirmed",
             message=patient_msg,
+            html_content=patient_html,
             recipient_email=current_user.email,
             status="pending"
         )
@@ -202,19 +219,28 @@ def confirm_booking(
         doctor_msg = (
             f"Dear Dr. {doctor.user.name},\n\n"
             f"A new appointment has been scheduled with patient {current_user.name}.\n"
-            f"Time: {booking_in.slot_start.strftime('%Y-%m-%d %H:%M')}\n\n"
+            f"Time: {slot_str}\n\n"
             f"AI Pre-visit Insights:\n"
             f"- Urgency Level: {ai_summary['urgency_level']}\n"
             f"- Chief Complaint: {ai_summary['chief_complaint']}\n"
             f"- Suggested Questions:\n{ai_summary['suggested_questions']}\n\n"
             f"Please log in to your dashboard to review details.\n\n"
             f"Regards,\n"
-            f"Healthcare Management System"
+            f"Atheria Healthcare Systems"
+        )
+        doctor_html = get_doctor_new_booking_html(
+            doctor_name=doctor.user.name,
+            patient_name=current_user.name,
+            slot_time=slot_str,
+            urgency=ai_summary['urgency_level'],
+            chief_complaint=ai_summary['chief_complaint'],
+            suggested_questions=ai_summary['suggested_questions']
         )
         doctor_noti = Notification(
             user_id=doctor.id,
             title="New Appointment Scheduled",
             message=doctor_msg,
+            html_content=doctor_html,
             recipient_email=doctor.user.email,
             status="pending"
         )
@@ -254,15 +280,41 @@ def cancel_appointment(
         
     appointment.status = "cancelled"
     
+    # Delete calendar event if exists
+    try:
+        delete_appointment_calendar_event(db, appointment)
+    except Exception as e:
+        print(f"Error removing calendar event: {e}")
+    
+    slot_str = appointment.slot_start.strftime('%Y-%m-%d %H:%M')
+    doc_name = appointment.doctor.user.name if appointment.doctor and appointment.doctor.user else "Physician"
+    pat_name = appointment.patient.name if appointment.patient else "Patient"
+    
     # Notify patient
+    pat_cancel_msg = f"Your appointment on {slot_str} with Dr. {doc_name} has been cancelled."
+    pat_cancel_html = get_appointment_cancelled_html(pat_name, doc_name, slot_str, is_doctor=False)
     patient_noti = Notification(
         user_id=appointment.patient_id,
         title="Appointment Cancelled",
-        message=f"Your appointment on {appointment.slot_start.strftime('%Y-%m-%d %H:%M')} has been cancelled.",
+        message=pat_cancel_msg,
+        html_content=pat_cancel_html,
         recipient_email=appointment.patient.email,
         status="pending"
     )
     db.add(patient_noti)
+    
+    # Notify doctor
+    doc_cancel_msg = f"Your appointment on {slot_str} with patient {pat_name} has been cancelled."
+    doc_cancel_html = get_appointment_cancelled_html(f"Dr. {doc_name}", pat_name, slot_str, is_doctor=True)
+    doctor_noti = Notification(
+        user_id=appointment.doctor_id,
+        title="Appointment Cancelled",
+        message=doc_cancel_msg,
+        html_content=doc_cancel_html,
+        recipient_email=appointment.doctor.user.email,
+        status="pending"
+    )
+    db.add(doctor_noti)
     
     db.commit()
     db.refresh(appointment)

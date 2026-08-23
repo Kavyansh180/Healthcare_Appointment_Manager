@@ -10,6 +10,7 @@ from ..models import User, Doctor, Appointment, Prescription, Reminder, Notifica
 from ..schemas import AppointmentResponse, PrescriptionResponse
 from ..auth import RoleChecker, get_current_user
 from ..llm import generate_patient_friendly_summary
+from ..email_service import get_post_visit_prescription_html
 
 router = APIRouter(prefix="/doctor", tags=["Doctor Portal"])
 doctor_required = RoleChecker(["doctor"])
@@ -140,13 +141,23 @@ def submit_prescription(
         f"--- Prescription ---\n{presc_text}\n\n"
         f"--- Doctor's Advice ---\n{data.additional_advice or 'Follow healthy lifestyle and complete prescribed medication course.'}\n\n"
         f"Regards,\n"
-        f"Healthcare Management System"
+        f"Atheria Healthcare Systems"
+    )
+    
+    email_html = get_post_visit_prescription_html(
+        patient_name=appointment.patient.name,
+        doctor_name=current_user.name,
+        diagnosis=data.diagnosis,
+        patient_summary=patient_summary,
+        prescription_text=presc_text,
+        advice=data.additional_advice
     )
     
     notification = Notification(
         user_id=appointment.patient_id,
         title="Your Post-Visit Prescription & AI Summary",
         message=email_msg,
+        html_content=email_html,
         recipient_email=appointment.patient.email,
         status="pending"
     )

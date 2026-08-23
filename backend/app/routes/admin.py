@@ -8,6 +8,7 @@ from ..models import User, Doctor, DoctorAvailability, DoctorLeave, Appointment,
 from ..schemas import DoctorCreate, DoctorProfileResponse, DoctorAvailabilityCreate, DoctorAvailabilityResponse, DoctorLeaveCreate, DoctorLeaveResponse, UserCreate
 from ..auth import RoleChecker, get_password_hash
 from ..calendar_service import delete_appointment_calendar_event
+from ..email_service import get_leave_cancellation_patient_html, get_leave_cancellation_doctor_html
 
 router = APIRouter(prefix="/admin", tags=["Admin Portal"])
 admin_required = Depends(RoleChecker(["admin"]))
@@ -212,20 +213,31 @@ def add_doctor_leave(
             affected_count += 1
             
             # 2. Queue Email notification for Patient
+            slot_str = appt.slot_start.strftime('%Y-%m-%d %H:%M')
+            leave_date_str = str(leave_in.leave_date)
+            
             patient_msg = (
                 f"Dear {appt.patient.name},\n\n"
                 f"We regret to inform you that your appointment with Dr. {doctor.user.name} "
-                f"scheduled for {appt.slot_start.strftime('%Y-%m-%d %H:%M')} has been CANCELLED "
-                f"because the doctor is on leave on this date ({leave_in.leave_date}).\n\n"
+                f"scheduled for {slot_str} has been CANCELLED "
+                f"because the doctor is on leave on this date ({leave_date_str}).\n\n"
                 f"Reason: {leave_in.reason or 'Personal leave'}\n\n"
-                f"Please log into your portal to select a different date or rebook your slot.\n\n"
+                f"Please log into your Atheria portal to select a different date or rebook your slot.\n\n"
                 f"Regards,\n"
-                f"Healthcare Management System"
+                f"Atheria Healthcare Systems"
+            )
+            patient_html = get_leave_cancellation_patient_html(
+                patient_name=appt.patient.name,
+                doctor_name=doctor.user.name,
+                slot_time=slot_str,
+                leave_date=leave_date_str,
+                reason=leave_in.reason
             )
             patient_notification = Notification(
                 user_id=appt.patient_id,
                 title="Appointment Cancelled - Doctor on Leave",
                 message=patient_msg,
+                html_content=patient_html,
                 recipient_email=appt.patient.email,
                 status="pending"
             )
@@ -235,15 +247,22 @@ def add_doctor_leave(
             doctor_msg = (
                 f"Dear Dr. {doctor.user.name},\n\n"
                 f"Your appointment with patient {appt.patient.name} "
-                f"on {appt.slot_start.strftime('%Y-%m-%d %H:%M')} has been cancelled "
-                f"as you have registered a leave on {leave_in.leave_date}.\n\n"
+                f"on {slot_str} has been cancelled "
+                f"as you have registered a leave on {leave_date_str}.\n\n"
                 f"Regards,\n"
-                f"Healthcare Management System"
+                f"Atheria Healthcare Systems"
+            )
+            doctor_html = get_leave_cancellation_doctor_html(
+                doctor_name=doctor.user.name,
+                patient_name=appt.patient.name,
+                slot_time=slot_str,
+                leave_date=leave_date_str
             )
             doctor_notification = Notification(
                 user_id=doctor_id,
                 title="Appointment Cancelled - Leave Registered",
                 message=doctor_msg,
+                html_content=doctor_html,
                 recipient_email=doctor.user.email,
                 status="pending"
             )

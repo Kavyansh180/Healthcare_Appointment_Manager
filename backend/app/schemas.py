@@ -177,3 +177,31 @@ class AppointmentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Notification Schemas
+class NotificationResponse(BaseModel):
+    id: int
+    user_id: int
+    title: str
+    message: str
+    html_content: Optional[str] = None
+    recipient_email: str
+    status: str  # pending, sent, failed
+    retry_count: int
+    last_attempt: Optional[datetime] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class NotificationStats(BaseModel):
+    total_count: int
+    sent_count: int
+    pending_count: int
+    failed_count: int
+
+class TestEmailRequest(BaseModel):
+    recipient_email: EmailStr
+    subject: Optional[str] = "Atheria Live Email Test"
+

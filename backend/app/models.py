@@ -148,7 +148,6 @@ class Prescription(Base):
     # Relationships
     appointment = relationship("Appointment", back_populates="prescription")
     reminders = relationship("Reminder", back_populates="prescription", cascade="all, delete-orphan")
-    reminders = relationship("Reminder", back_populates="prescription", cascade="all, delete-orphan")
 
 class Reminder(Base):
     __tablename__ = "reminders"
@@ -170,6 +169,7 @@ class Notification(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     title = Column(String(150), nullable=False)
     message = Column(Text, nullable=False)
+    html_content = Column(Text, nullable=True)
     recipient_email = Column(String(100), nullable=False)
     status = Column(String(20), default="pending")  # pending, sent, failed
     retry_count = Column(Integer, default=0)

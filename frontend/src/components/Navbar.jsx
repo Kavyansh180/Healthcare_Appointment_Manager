@@ -9,7 +9,9 @@ import {
   CalendarOff, 
   BarChart3, 
   LogOut,
-  Sparkles
+  Sparkles,
+  Mail,
+  Database
 } from "lucide-react";
 
 export default function Navbar({ 
@@ -17,7 +19,8 @@ export default function Navbar({
   activeTab, 
   setActiveTab, 
   onLogout, 
-  onQuickSwitch 
+  onQuickSwitch,
+  onOpenNotifications
 }) {
   const isPatient = user?.role === "patient";
   const isDoctor = user?.role === "doctor";
@@ -30,7 +33,7 @@ export default function Navbar({
         <div className="flex items-center gap-2">
           <Sparkles className="w-3.5 h-3.5 text-divine-gold animate-pulse" />
           <span className="font-medium text-warm-white">
-            Aetheria AI Healthcare Suite <span className="text-divine-gold/80">• Groq LLaMA 3.3 70B & Concurrency Engine</span>
+            Atheria AI Healthcare Suite <span className="text-divine-gold/80">• Groq LLaMA 3.3 70B & Concurrency Engine</span>
           </span>
         </div>
 
@@ -80,15 +83,15 @@ export default function Navbar({
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="text-lg font-bold tracking-tight text-warm-white">
-                HealthSync
+              <span className="text-lg font-bold tracking-tight text-warm-white font-serif">
+                Atheria
               </span>
               <span className="text-[10px] font-bold px-1.5 py-0.2 bg-divine-gold/20 text-divine-gold rounded border border-divine-gold/30">
-                PRO
+                HEALTH
               </span>
             </div>
             <p className="text-[10px] text-warm-white/40 tracking-wider uppercase font-medium">
-              Healthcare Suite
+              Care & Follow-up Suite
             </p>
           </div>
         </div>
@@ -226,14 +229,37 @@ export default function Navbar({
                 }`}
               >
                 <BarChart3 className="w-3.5 h-3.5" />
-                Platform Analytics
+                Analytics
+              </button>
+              <button
+                onClick={() => setActiveTab("database")}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+                  activeTab === "database"
+                    ? "bg-divine-gold/20 text-divine-gold border border-divine-gold/30 shadow-sm"
+                    : "text-warm-white/70 hover:text-cream hover:bg-white/5"
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                SQL & DB
               </button>
             </>
           )}
         </nav>
 
-        {/* User Pill & Logout */}
-        <div className="flex items-center gap-3">
+        {/* Live Email Center & User Pill & Logout */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          
+          {/* Email Outbox Trigger Button */}
+          <button
+            onClick={onOpenNotifications}
+            title="Live Email Outbox & Notification Logs"
+            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-divine-gold/15 to-royal-purple border border-divine-gold/30 text-divine-gold hover:border-divine-gold/60 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm text-xs font-semibold"
+          >
+            <Mail className="w-3.5 h-3.5 text-divine-gold" />
+            <span className="hidden sm:inline">Email Outbox</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          </button>
+
           <div className="text-right hidden sm:block">
             <div className="text-xs font-semibold text-warm-white">
               {user?.name || "Healthcare User"}

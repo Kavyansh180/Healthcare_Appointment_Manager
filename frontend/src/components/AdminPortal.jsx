@@ -14,7 +14,13 @@ import {
   Star, 
   ShieldCheck, 
   Building2, 
-  Sparkles 
+  Sparkles,
+  Database,
+  Code2,
+  Layers,
+  Terminal,
+  Copy,
+  Check
 } from "lucide-react";
 import { API_URL } from "../config";
 
@@ -604,6 +610,207 @@ export default function AdminPortal({ token, user, activeTab, setActiveTab }) {
                     {analytics?.status_distribution?.cancelled ?? 0}
                   </span>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* TAB 5: SQL & DATABASE EXPLORER */}
+      {/* ======================================================== */}
+      {activeTab === "database" && (
+        <div className="space-y-8">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Database className="w-6 h-6 text-divine-gold" />
+                <h2 className="text-2xl font-bold text-warm-white">SQL & Relational Database Architecture</h2>
+              </div>
+              <p className="text-xs text-warm-white/60 mt-0.5">
+                Full relational DDL schema, foreign key cascade constraints, conditional unique keys, and production SQL queries.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                MySQL / SQLite Hybrid Engine Active
+              </span>
+            </div>
+          </div>
+
+          {/* Database Tables Matrix */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm font-bold text-warm-white">
+              <Layers className="w-4 h-4 text-divine-gold" />
+              <span>Relational Schema Overview (10 Production Tables)</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[
+                { name: "users", rows: "3+ records", desc: "Core auth, credentials hash, role separation (patient, doctor, admin), Google tokens." },
+                { name: "doctors", rows: `${doctors.length} specialists`, desc: "Specialization, consultation fee, experience, ratings, clinic suites, bio." },
+                { name: "doctor_availabilities", rows: "6 days/doc", desc: "Weekday recurring hours (0=Mon..6=Sun) with start/end time validation." },
+                { name: "doctor_leaves", rows: `${leaves.length} records`, desc: "Specific absence dates. Triggers automatic conflict cancellation & email dispatch." },
+                { name: "slot_holds", rows: "Dynamic", desc: "10-min reservation holds with pessimistic row locks (FOR UPDATE) & expiry." },
+                { name: "appointments", rows: "Active", desc: "Consultations with generated active_slot_key for conditional double-booking safety." },
+                { name: "symptom_forms", rows: "Active", desc: "Patient symptoms, duration, severity, and Groq LLM clinical triage urgency." },
+                { name: "prescriptions", rows: "Active", desc: "Doctor clinical notes, medications JSON, and AI patient-friendly summary." },
+                { name: "reminders", rows: "Active", desc: "Prescription dosage schedules with automated daily background reminders." },
+                { name: "notifications", rows: "Outbox Queue", desc: "Reliable outbox email queue with retry tracking and 30s background processor." }
+              ].map((t) => (
+                <div key={t.name} className="p-4 rounded-xl bg-royal-purple/25 border border-divine-gold/15 space-y-1.5 hover:border-divine-gold/35 transition-all">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-divine-gold">`{t.name}`</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-deep-black/60 border border-divine-gold/20 text-warm-white/70">
+                      {t.rows}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-warm-white/60 leading-relaxed">{t.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Production SQL Queries Showcase */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm font-bold text-warm-white">
+              <Terminal className="w-4 h-4 text-divine-gold" />
+              <span>Production SQL Query Catalogue</span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Query 1: Double Booking Concurrency Lock */}
+              <div className="p-5 rounded-2xl bg-[#090315] border border-divine-gold/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Code2 className="w-4 h-4 text-divine-gold" />
+                    <span className="text-xs font-bold text-warm-white">
+                      1. Concurrency Row Lock & Double-Booking Safety
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                    Pessimistic Lock
+                  </span>
+                </div>
+                <p className="text-[11px] text-warm-white/60">
+                  Locks slot records during simultaneous booking requests using row-level FOR UPDATE.
+                </p>
+                <pre className="p-3.5 rounded-xl bg-deep-black/80 border border-divine-gold/10 text-[11px] text-divine-gold/90 font-mono overflow-x-auto leading-relaxed">
+{`-- Lock and check active appointments
+SELECT id, patient_id, status 
+FROM appointments 
+WHERE doctor_id = :doctor_id 
+  AND slot_start = :slot_start 
+  AND status = 'scheduled'
+FOR UPDATE;
+
+-- Lock and verify active 10-minute holds
+SELECT id, held_by_patient_id, expires_at 
+FROM slot_holds 
+WHERE doctor_id = :doctor_id 
+  AND slot_start = :slot_start 
+  AND expires_at > UTC_TIMESTAMP()
+FOR UPDATE;`}
+                </pre>
+              </div>
+
+              {/* Query 2: Doctor Leave Conflict Detection */}
+              <div className="p-5 rounded-2xl bg-[#090315] border border-divine-gold/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Code2 className="w-4 h-4 text-divine-gold" />
+                    <span className="text-xs font-bold text-warm-white">
+                      2. Doctor Leave Conflict & Affected Patients
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
+                    Auto-Cascade
+                  </span>
+                </div>
+                <p className="text-[11px] text-warm-white/60">
+                  Finds conflicting appointments on registered leave date for cancellation & notification.
+                </p>
+                <pre className="p-3.5 rounded-xl bg-deep-black/80 border border-divine-gold/10 text-[11px] text-divine-gold/90 font-mono overflow-x-auto leading-relaxed">
+{`SELECT 
+    a.id AS appointment_id,
+    a.slot_start,
+    p.name AS patient_name,
+    p.email AS patient_email,
+    doc_user.name AS doctor_name
+FROM appointments a
+JOIN users p ON a.patient_id = p.id
+JOIN doctors d ON a.doctor_id = d.id
+JOIN users doc_user ON d.id = doc_user.id
+WHERE a.doctor_id = :doctor_id
+  AND DATE(a.slot_start) = :leave_date
+  AND a.status = 'scheduled';`}
+                </pre>
+              </div>
+
+              {/* Query 3: AI Clinical Triage Urgency Queue */}
+              <div className="p-5 rounded-2xl bg-[#090315] border border-divine-gold/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Code2 className="w-4 h-4 text-divine-gold" />
+                    <span className="text-xs font-bold text-warm-white">
+                      3. Doctor Triage Queue (AI Urgency Order)
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                    AI Prioritized
+                  </span>
+                </div>
+                <p className="text-[11px] text-warm-white/60">
+                  Prioritizes high-risk clinical symptoms before routine consultations.
+                </p>
+                <pre className="p-3.5 rounded-xl bg-deep-black/80 border border-divine-gold/10 text-[11px] text-divine-gold/90 font-mono overflow-x-auto leading-relaxed">
+{`SELECT 
+    a.id, a.slot_start, p.name,
+    sf.urgency_level, sf.chief_complaint
+FROM appointments a
+JOIN users p ON a.patient_id = p.id
+LEFT JOIN symptom_forms sf ON a.id = sf.appointment_id
+WHERE a.doctor_id = :doctor_id
+ORDER BY 
+    CASE 
+        WHEN sf.urgency_level = 'High' THEN 1
+        WHEN sf.urgency_level = 'Medium' THEN 2
+        WHEN sf.urgency_level = 'Low' THEN 3
+        ELSE 4
+    END ASC,
+    a.slot_start ASC;`}
+                </pre>
+              </div>
+
+              {/* Query 4: Daily Medication Reminders Dispatch */}
+              <div className="p-5 rounded-2xl bg-[#090315] border border-divine-gold/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Code2 className="w-4 h-4 text-divine-gold" />
+                    <span className="text-xs font-bold text-warm-white">
+                      4. Medication Reminders Background Polling
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                    APScheduler 60s
+                  </span>
+                </div>
+                <p className="text-[11px] text-warm-white/60">
+                  Polls prescriptions due for dosage reminders today and queues email notifications.
+                </p>
+                <pre className="p-3.5 rounded-xl bg-deep-black/80 border border-divine-gold/10 text-[11px] text-divine-gold/90 font-mono overflow-x-auto leading-relaxed">
+{`SELECT 
+    r.id, r.medication_name, r.reminder_time,
+    patient.email AS patient_email
+FROM reminders r
+JOIN prescriptions p ON r.prescription_id = p.id
+JOIN appointments a ON p.appointment_id = a.id
+JOIN users patient ON a.patient_id = patient.id
+WHERE (r.last_sent_at IS NULL OR DATE(r.last_sent_at) < CURRENT_DATE())
+  AND CURRENT_TIME() >= r.reminder_time;`}
+                </pre>
               </div>
             </div>
           </div>
